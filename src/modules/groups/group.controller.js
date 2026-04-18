@@ -74,3 +74,17 @@ export const deleteGroup = async (req, res, next) => {
     next(error);
   }
 };
+
+// export const getSearchGroup = async (req, res, next) => {
+//     try {
+//     const { materia, link, carrera, comision } = req.body;
+//     const group = await Group.find({ status: "approved" })
+//       .sort({
+//         createdAt: -1,
+//       })
+//       .lean();
+//     res.status(200).json(group);
+//   } catch (error) {
+//     next(error);
+//   }
+// }
