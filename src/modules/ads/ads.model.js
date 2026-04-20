@@ -4,7 +4,10 @@ const announcementSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
     message: { type: String, required: true },
-    expiresAt: { type: Date, required: true }, // Se borrarán solos o dejarán de mostrarse pasada esta fecha
+    expiresAt: {
+      type: Date,
+      default: () => Date.now() + 7 * 24 * 60 * 60 * 1000,
+    },
   },
   { timestamps: true },
 );

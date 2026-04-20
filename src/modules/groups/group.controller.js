@@ -2,11 +2,13 @@ import Group from "./group.model.js";
 
 export const getApprovedGroups = async (req, res, next) => {
   try {
-    const groups = await Group.find({ status: "approved" })
-      .sort({
-        createdAt: -1,
-      })
+    const groups = await Group.find({ isApproved: true })
+      .sort({ createdAt: -1 })
       .lean();
+
+    console.log(
+      `✅ Se encontraron ${groups.length} grupos aprobados en MongoDB.`,
+    );
     res.status(200).json(groups);
   } catch (error) {
     next(error);
@@ -15,10 +17,8 @@ export const getApprovedGroups = async (req, res, next) => {
 
 export const getPendingGroups = async (req, res, next) => {
   try {
-    const groups = await Group.find({ status: "pending" })
-      .sort({
-        createdAt: -1,
-      })
+    const groups = await Group.find({ isApproved: false })
+      .sort({ createdAt: -1 })
       .lean();
     res.status(200).json(groups);
   } catch (error) {
@@ -30,7 +30,6 @@ export const createGroup = async (req, res, next) => {
   try {
     const { materia, link, carrera } = req.body;
 
-    // 🔴 Validación de Seguridad
     if (!materia || !link || !carrera) {
       const err = new Error("Faltan campos obligatorios para crear el grupo");
       err.statusCode = 400;
@@ -47,9 +46,10 @@ export const createGroup = async (req, res, next) => {
 
 export const approveGroup = async (req, res, next) => {
   try {
+    console.log(`Aprobando grupo con ID: ${req.params.id}`);
     const group = await Group.findByIdAndUpdate(
       req.params.id,
-      { status: "approved" },
+      { isApproved: true }, // 🔴 IMPORTANTE: Actualizar el Booleano
       { new: true },
     );
     if (!group)
@@ -74,17 +74,3 @@ export const deleteGroup = async (req, res, next) => {
     next(error);
   }
 };
-
-// export const getSearchGroup = async (req, res, next) => {
-//     try {
-//     const { materia, link, carrera, comision } = req.body;
-//     const group = await Group.find({ status: "approved" })
-//       .sort({
-//         createdAt: -1,
-//       })
-//       .lean();
-//     res.status(200).json(group);
-//   } catch (error) {
-//     next(error);
-//   }
-// }

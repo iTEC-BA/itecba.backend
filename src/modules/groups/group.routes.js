@@ -10,11 +10,9 @@ import { verifyToken, requireAdmin } from "../../middlewares/authMiddleware.js";
 
 const router = Router();
 
-// 🟢 RUTAS PÚBLICAS
 router.get("/", getApprovedGroups);
-router.post("/", createGroup); // Subir un grupo queda pendiente de aprobación
+router.post("/", createGroup);
 
-// 🔴 RUTAS PROTEGIDAS
 router.get("/pending", verifyToken, requireAdmin, getPendingGroups);
 router.put("/:id/approve", verifyToken, requireAdmin, approveGroup);
 router.delete("/:id", verifyToken, requireAdmin, deleteGroup);
