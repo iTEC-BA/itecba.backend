@@ -1,5 +1,5 @@
 import Course from "./course.model.js";
-import ytpl from "ytpl"; // 🔴 ¡AQUÍ ESTÁ LA MAGIA QUE FALTABA!
+import youtubedl from "youtube-dl-exec";
 
 export const getCourses = async (req, res, next) => {
   try {
@@ -80,26 +80,53 @@ export const fetchPlaylistDetails = async (req, res, next) => {
       err.statusCode = 400;
       throw err;
     }
-    // Usamos ytpl para hacer scraping de la playlist (límite de 50 videos)
-    const playlist = await ytpl(playlistUrl, { limit: 300 });
 
-    // Mapeamos los datos para que tengan el formato exacto de tu base de datos
-    const videos = playlist.items.map((item) => ({
-      youtubeId: item.id,
-      title: item.title,
-      duration: item.duration || "0:00",
-    }));
+    console.log(`⏳ Iniciando scraping de la playlist: ${playlistUrl}`);
 
-    // Devolvemos el título de la playlist y sus videos
-    res.json({
-      title: playlist.title,
+    // Ejecutamos yt-dlp mediante el wrapper para extraer metadata en formato JSON
+    // flat-playlist asegura que solo extraigamos metadatos rápidamente sin descargar video
+    const playlistData = await youtubedl(playlistUrl, {
+      dumpSingleJson: true,
+      flatPlaylist: true,
+      noWarnings: true,
+      callHome: false,
+      noCheckCertificate: true,
+    });
+
+    if (!playlistData || !playlistData.entries) {
+      throw new Error("No se pudo extraer información o la playlist está vacía/privada.");
+    }
+
+    // Mapeamos los datos para adaptarlos al Schema de Mongoose
+    const videos = playlistData.entries.map((item) => {
+      // yt-dlp devuelve la duración en segundos, la formateamos a "M:SS" o "H:MM:SS"
+      const formatDuration = (seconds) => {
+        if (!seconds) return "0:00";
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        return `${m}:${s.toString().padStart(2, '0')}`;
+      };
+
+      return {
+        youtubeId: item.id,
+        title: item.title,
+        duration: formatDuration(item.duration)
+      };
+    });
+
+    res.status(200).json({
+      title: playlistData.title || "Playlist sin título",
+      description: playlistData.description || "",
       videos: videos,
     });
-    // AQUI: Lógica que ya tenías para extraer videos usando tu API_KEY de Google/YouTube
-    // Como no veo tu lógica interna de YouTube en el snippet, asegúrate de pegarla aquí.
-    // ...
-    // res.status(200).json({ title: 'Título', videos: [...] });
+
   } catch (error) {
-    next(error);
+    console.error("🚨 Error haciendo scraping con yt-dlp:", error.message);
+    // Si falla, pasamos un error claro al middleware global
+    const err = new Error("Falló la extracción de videos de YouTube. Revisa si el link es público.");
+    err.statusCode = 500;
+    next(err);
   }
 };
