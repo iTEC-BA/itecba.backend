@@ -12,7 +12,9 @@ const courseSchema = new mongoose.Schema(
     description: { type: String, required: true },
     imageUrl: { type: String, required: true },
     playlistId: { type: String },
-    videos: [videoSchema], // Array de videos dentro del curso
+    materia: { type: String, default: "" },
+    categoria: { type: String, default: "Comunidad" },
+    videos: [videoSchema],
   },
   { timestamps: true },
 );
