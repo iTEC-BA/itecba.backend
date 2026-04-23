@@ -4,10 +4,9 @@ const announcementSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
     message: { type: String, required: true },
-    expiresAt: {
-      type: Date,
-      default: () => Date.now() + 7 * 24 * 60 * 60 * 1000,
-    },
+    active: { type: Boolean, default: true },
+    isCritical: { type: Boolean, default: false },
+    expiresAt: { type: Date, required: true },
   },
   { timestamps: true },
 );
