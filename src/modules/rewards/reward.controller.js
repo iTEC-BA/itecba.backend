@@ -1,4 +1,5 @@
 import { Reward } from "./reward.model.js";
+import { Redemption } from "./redemption.model.js";
 import { dbFirebase } from "../../config/firebase-admin.js";
 import admin from "firebase-admin";
 
@@ -60,13 +61,11 @@ export const rewardController = {
       });
       await redemption.save();
 
-      res
-        .status(200)
-        .json({
-          success: true,
-          newBalance: currentPoints - reward.pointsCost,
-          message: "Canje exitoso",
-        });
+      res.status(200).json({
+        success: true,
+        newBalance: currentPoints - reward.pointsCost,
+        message: "Canje exitoso",
+      });
     } catch (error) {
       next(error);
     }
