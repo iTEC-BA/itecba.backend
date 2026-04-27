@@ -19,6 +19,7 @@ import linksRoutes from "./modules/links/link.routes.js";
 import courseRoutes from "./modules/courses/course.routes.js";
 import aiRoutes from "./modules/ais/ai.routes.js";
 import rewardRoutes from "./modules/rewards/reward.routes.js";
+import messageRoutes from "./modules/messages/message.routes.js";
 const app = express();
 
 // 1. Conexión a DB
@@ -54,6 +55,8 @@ app.use("/api/links", linksRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/rewards", rewardRoutes);
+app.use("/api/messages", messageRoutes);
+
 app.get("/health", (req, res) => {
   res
     .status(200)

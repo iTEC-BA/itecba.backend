@@ -28,39 +28,54 @@ export const rewardController = {
     try {
       const { rewardId, payload } = req.body;
       const userId = req.user.uid;
+      const userEmail = req.user.email; // Viene del token
 
-      // 1. Verificar existencia en MongoDB
       const reward = await Reward.findById(rewardId);
-      if (!reward) {
+      if (!reward)
         return res.status(404).json({ message: "Beneficio no encontrado" });
-      }
 
-      // 2. Traer usuario de Firestore
       const userRef = dbFirebase.collection("users").doc(userId);
       const userDoc = await userRef.get();
 
-      if (!userDoc.exists) {
+      if (!userDoc.exists)
         return res.status(404).json({ message: "Usuario no encontrado" });
-      }
 
-      const userData = userDoc.data();
-      const currentPoints = userData.points || 0;
-
-      // 3. Validar saldo
+      const currentPoints = userDoc.data().points || 0;
       if (currentPoints < reward.pointsCost) {
         return res.status(400).json({ message: "Puntos insuficientes" });
       }
 
-      // 4. Descuento atómico en Firestore
       await userRef.update({
         points: admin.firestore.FieldValue.increment(-reward.pointsCost),
       });
 
-      res.status(200).json({
-        success: true,
-        newBalance: currentPoints - reward.pointsCost,
-        message: "Canje exitoso",
+      // Guardar el registro del canje
+      const redemption = new Redemption({
+        userId,
+        userEmail,
+        rewardId,
+        rewardTitle: reward.title,
+        pointsCost: reward.pointsCost,
+        payload,
       });
+      await redemption.save();
+
+      res
+        .status(200)
+        .json({
+          success: true,
+          newBalance: currentPoints - reward.pointsCost,
+          message: "Canje exitoso",
+        });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  getAllRedemptions: async (req, res, next) => {
+    try {
+      const redemptions = await Redemption.find().sort({ createdAt: -1 });
+      res.status(200).json(redemptions);
     } catch (error) {
       next(error);
     }

@@ -13,4 +13,10 @@ router.post(
 );
 router.get("/list", verifyToken, rewardController.getRewards);
 
+router.get(
+  "/redemptions",
+  verifyToken,
+  requireAdmin,
+  rewardController.getAllRedemptions,
+);
 export default router;
