@@ -29,27 +29,29 @@ export const rewardController = {
       const { rewardId, payload } = req.body;
       const userId = req.user.uid;
 
-      // 1. Verificar si el beneficio existe en MongoDB
+      // 1. Verificar existencia en MongoDB
       const reward = await Reward.findById(rewardId);
-      if (!reward)
+      if (!reward) {
         return res.status(404).json({ message: "Beneficio no encontrado" });
+      }
 
-      // 2. Traer el usuario de TU base de datos de Firestore
+      // 2. Traer usuario de Firestore
       const userRef = dbFirebase.collection("users").doc(userId);
       const userDoc = await userRef.get();
 
-      if (!userDoc.exists)
+      if (!userDoc.exists) {
         return res.status(404).json({ message: "Usuario no encontrado" });
+      }
 
       const userData = userDoc.data();
       const currentPoints = userData.points || 0;
 
-      // 3. Validar puntos
+      // 3. Validar saldo
       if (currentPoints < reward.pointsCost) {
         return res.status(400).json({ message: "Puntos insuficientes" });
       }
 
-      // 4. Descontar puntos atómicamente en Firestore
+      // 4. Descuento atómico en Firestore
       await userRef.update({
         points: admin.firestore.FieldValue.increment(-reward.pointsCost),
       });
