@@ -3,16 +3,15 @@ import { sendNotificationEmail } from "../../config/mailer.js";
 
 export const messageController = {
   // Admin envía mensaje a un usuario
-  sendMessage: async (req, res, next) => {
+ sendMessage: async (req, res, next) => {
     try {
       const { userId, userEmail, subject, content } = req.body;
 
-      // 1. Guardar en Base de Datos (Buzón interno)
       const newMessage = new Message({ userId, subject, content });
       await newMessage.save();
 
-      // 2. Enviar por Correo Electrónico
-      const htmlContent = `
+      try {
+        const htmlContent = `
         <div style="font-family: Arial, sans-serif; color: #333; max-w-lg mx-auto p-6 border border-gray-200 rounded-lg">
           <h2 style="color: #022a5e;">Nuevo mensaje de Administración ITEC</h2>
           <p>Hola,</p>
@@ -23,17 +22,13 @@ export const messageController = {
           </div>
           <p>Puedes revisar este mensaje ingresando a tu Buzón en la plataforma.</p>
         </div>
-      `;
+      `; // Tu HTML
+        await sendNotificationEmail(userEmail, `Aviso ITEC: ${subject}`, htmlContent);
+      } catch (mailError) {
+        console.error("No se pudo enviar el correo, pero el mensaje interno se guardó.", mailError);
+      }
 
-      await sendNotificationEmail(
-        userEmail,
-        `Aviso ITEC: ${subject}`,
-        htmlContent,
-      );
-
-      res
-        .status(201)
-        .json({ success: true, message: "Mensaje enviado y notificado" });
+      res.status(201).json({ success: true, message: "Mensaje guardado (y notificado si el correo está configurado)" });
     } catch (error) {
       next(error);
     }
