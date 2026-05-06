@@ -1,25 +1,26 @@
-import express        from "express";
-import cors           from "cors";
-import helmet         from "helmet";
-import morgan         from "morgan";
-import compression    from "compression";
-import rateLimit      from "express-rate-limit";
-import cron           from "node-cron";
-import dotenv         from "dotenv";
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import morgan from "morgan";
+import compression from "compression";
+import rateLimit from "express-rate-limit";
+import cron from "node-cron";
+import dotenv from "dotenv";
 dotenv.config();
 
-import connectDB            from "./config/mongo.js";
-import { errorHandler }     from "./middlewares/errorHandler.js";
+import connectDB from "./config/mongo.js";
+import { errorHandler } from "./middlewares/errorHandler.js";
 
 // ── Módulos ──────────────────────────────────────────────────────────────────
-import announcementRoutes   from "./modules/ads/ads.routes.js";
-import resourceRoutes       from "./modules/resources/resource.routes.js";
-import groupRoutes          from "./modules/groups/group.routes.js";
-import linksRoutes          from "./modules/links/link.routes.js";
-import courseRoutes         from "./modules/courses/course.routes.js";
-import aiRoutes             from "./modules/ais/ai.routes.js";
-import usersRoutes          from "./modules/users/user.routes.js";
-
+import announcementRoutes from "./modules/ads/ads.routes.js";
+import resourceRoutes from "./modules/resources/resource.routes.js";
+import groupRoutes from "./modules/groups/group.routes.js";
+import linksRoutes from "./modules/links/link.routes.js";
+import courseRoutes from "./modules/courses/course.routes.js";
+import aiRoutes from "./modules/ais/ai.routes.js";
+import usersRoutes from "./modules/users/user.routes.js";
+import rewardRoutes from "./modules/rewards/reward.routes.js";
+import messageRoutes from "./modules/messages/message.routes.js";
 const app = express();
 
 // ── 1. DB ─────────────────────────────────────────────────────────────────────
@@ -31,8 +32,8 @@ app.set("trust proxy", 1); // Necesario en Render para que rate-limit lea la IP 
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false, // Permite embeds de YouTube en el frontend
-    contentSecurityPolicy: false,     // El frontend maneja su propia CSP
-  })
+    contentSecurityPolicy: false, // El frontend maneja su propia CSP
+  }),
 );
 
 const allowedOrigins = (process.env.FRONTEND_URL || "")
@@ -49,14 +50,14 @@ app.use(
         return cb(null, true);
       cb(new Error(`CORS bloqueado para origin: ${origin}`));
     },
-    methods:     ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
-  })
+  }),
 );
 
 // ── 3. Compresión y parseo ────────────────────────────────────────────────────
-app.use(compression());                       // gzip — importante en free tier
-app.use(express.json({ limit: "2mb" }));      // 10mb era demasiado, 2mb es suficiente
+app.use(compression()); // gzip — importante en free tier
+app.use(express.json({ limit: "2mb" })); // 10mb era demasiado, 2mb es suficiente
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
 // ── 4. Logging ────────────────────────────────────────────────────────────────
@@ -66,20 +67,26 @@ app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 // ── 5. Rate Limiting ──────────────────────────────────────────────────────────
 const baseLimit = rateLimit({
-  windowMs:        15 * 60 * 1000,
-  max:             300,
+  windowMs: 15 * 60 * 1000,
+  max: 300,
   standardHeaders: true,
-  legacyHeaders:   false,
-  message:         { error: true, message: "Demasiadas peticiones. Intentá en 15 minutos." },
+  legacyHeaders: false,
+  message: {
+    error: true,
+    message: "Demasiadas peticiones. Intentá en 15 minutos.",
+  },
 });
 
 // Límite más estricto para la IA (caro en tokens/créditos)
 const aiLimit = rateLimit({
-  windowMs:        60 * 1000,  // 1 minuto
-  max:             10,
+  windowMs: 60 * 1000, // 1 minuto
+  max: 10,
   standardHeaders: true,
-  legacyHeaders:   false,
-  message:         { error: true, message: "Límite del chatbot alcanzado. Esperá 1 minuto." },
+  legacyHeaders: false,
+  message: {
+    error: true,
+    message: "Límite del chatbot alcanzado. Esperá 1 minuto.",
+  },
 });
 
 app.use("/api", baseLimit);
@@ -87,21 +94,21 @@ app.use("/api/ai", aiLimit);
 
 // ── 6. Rutas ──────────────────────────────────────────────────────────────────
 app.use("/api/announcements", announcementRoutes);
-app.use("/api/resources",     resourceRoutes);
-app.use("/api/groups",        groupRoutes);
-app.use("/api/links",         linksRoutes);
-app.use("/api/courses",       courseRoutes);
-app.use("/api/ai",            aiRoutes);
-app.use("/api/users",         usersRoutes);
+app.use("/api/resources", resourceRoutes);
+app.use("/api/groups", groupRoutes);
+app.use("/api/links", linksRoutes);
+app.use("/api/courses", courseRoutes);
+app.use("/api/ai", aiRoutes);
+app.use("/api/users", usersRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>
   res.status(200).json({
-    status:    "OK",
-    service:   "iTEC BA Backend",
+    status: "OK",
+    service: "iTEC BA Backend",
     timestamp: new Date().toISOString(),
-    uptime:    Math.floor(process.uptime()),
-  })
+    uptime: Math.floor(process.uptime()),
+  }),
 );
 
 // ── 8. Anti-sleep: self-ping cada 14 min (Render free duerme a los 15 min) ───
@@ -121,7 +128,7 @@ if (process.env.NODE_ENV === "production" && process.env.RENDER_EXTERNAL_URL) {
 
 // ── 9. 404 para rutas inexistentes ───────────────────────────────────────────
 app.use((_req, res) =>
-  res.status(404).json({ error: true, message: "Endpoint no encontrado" })
+  res.status(404).json({ error: true, message: "Endpoint no encontrado" }),
 );
 
 // ── 10. Manejador global de errores (SIEMPRE al final) ────────────────────────
@@ -138,5 +145,7 @@ process.on("uncaughtException", (err) => {
 
 const PORT = process.env.PORT || 5001;
 app.listen(PORT, () =>
-  console.log(`🚀 Servidor escuchando en puerto ${PORT} [${process.env.NODE_ENV || "development"}]`)
+  console.log(
+    `🚀 Servidor escuchando en puerto ${PORT} [${process.env.NODE_ENV || "development"}]`,
+  ),
 );
