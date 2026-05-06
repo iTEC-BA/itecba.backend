@@ -1,20 +1,30 @@
-import { Router } from "express";
+import { Router }                       from "express";
+import { body }                         from "express-validator";
+import { validate }                     from "../../middlewares/validate.js";
+import { verifyToken, requireAdmin }    from "../../middlewares/authMiddleware.js";
 import {
   getActiveAnnouncement,
   createAnnouncement,
   deactivateAnnouncement,
 } from "./ads.controller.js";
-import { verifyToken, requireAdmin } from "../../middlewares/authMiddleware.js";
 
 const router = Router();
 
-// RUTAS PÚBLICAS
 router.get("/active", getActiveAnnouncement);
 
-// RUTAS PROTEGIDAS
-router.post("/", verifyToken, requireAdmin, createAnnouncement);
+router.post(
+  "/",
+  verifyToken, requireAdmin,
+  [
+    body("title").trim().notEmpty().withMessage("Título requerido").isLength({ max: 120 }),
+    body("message").trim().notEmpty().withMessage("Mensaje requerido").isLength({ max: 500 }),
+    body("hoursActive").optional().isInt({ min: 1, max: 168 }).toInt(),
+    body("isCritical").optional().isBoolean().toBoolean(),
+  ],
+  validate,
+  createAnnouncement
+);
 
-// CAMBIO AQUÍ: Ahora es DELETE para que haga match con tu adminService.ts
 router.delete("/:id", verifyToken, requireAdmin, deactivateAnnouncement);
 
 export default router;

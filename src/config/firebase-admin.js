@@ -1,21 +1,27 @@
 import admin from "firebase-admin";
 import dotenv from "dotenv";
-
 dotenv.config();
 
-// Construimos el objeto de credenciales usando las variables de entorno
-const serviceAccount = {
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  // Reemplazamos los escapes de saltos de línea para que el SDK los lea bien
-  privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-};
+// Validación temprana de variables críticas
+const required = ["FIREBASE_PROJECT_ID", "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY"];
+for (const key of required) {
+  if (!process.env[key]) {
+    console.error(`🔴 Variable de entorno faltante: ${key}`);
+    process.exit(1);
+  }
+}
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+// Inicializar solo si no hay instancia activa (útil en hot-reload)
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId:   process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey:  process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    }),
+  });
+}
 
-export const dbFirebase = admin.firestore();
+export const dbFirebase   = admin.firestore();
 export const authFirebase = admin.auth();
-
-console.log("🟢 Firebase Admin Conectado Correctamente (vía ENV)");
+console.log("🟢 Firebase Admin conectado");

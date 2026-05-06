@@ -1,76 +1,70 @@
 import Group from "./group.model.js";
+import { notFound } from "../../middlewares/errorHandler.js";
 
+// GET /api/groups  — públicos y aprobados, con filtros opcionales
 export const getApprovedGroups = async (req, res, next) => {
   try {
-    const groups = await Group.find({ isApproved: true })
-      .sort({ createdAt: -1 })
-      .lean();
+    const { carrera, materia, nivel } = req.query;
+    const filter = { isApproved: true };
+    if (carrera) filter.carrera = { $regex: carrera, $options: "i" };
+    if (materia) filter.materia = { $regex: materia, $options: "i" };
+    if (nivel)   filter.nivel   = nivel;
 
-    console.log(
-      `✅ Se encontraron ${groups.length} grupos aprobados en MongoDB.`,
-    );
+    const groups = await Group.find(filter).sort({ createdAt: -1 }).lean();
     res.status(200).json(groups);
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
 };
 
+// GET /api/groups/pending  — solo admin
 export const getPendingGroups = async (req, res, next) => {
   try {
     const groups = await Group.find({ isApproved: false })
       .sort({ createdAt: -1 })
       .lean();
     res.status(200).json(groups);
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
 };
 
+// POST /api/groups  — cualquier usuario autenticado puede proponer
 export const createGroup = async (req, res, next) => {
   try {
-    const { materia, link, carrera } = req.body;
-
-    if (!materia || !link || !carrera) {
-      const err = new Error("Faltan campos obligatorios para crear el grupo");
-      err.statusCode = 400;
-      throw err;
-    }
-
-    const newGroup = new Group(req.body);
-    const savedGroup = await newGroup.save();
-    res.status(201).json(savedGroup);
-  } catch (error) {
-    next(error);
+    const doc = await Group.create({
+      ...req.body,
+      submittedBy: req.user?.uid ?? "anon",
+      isApproved:  false,
+    });
+    res.status(201).json(doc);
+  } catch (err) {
+    next(err);
   }
 };
 
+// PUT /api/groups/:id/approve  — solo admin
 export const approveGroup = async (req, res, next) => {
   try {
-    console.log(`Aprobando grupo con ID: ${req.params.id}`);
-    const group = await Group.findByIdAndUpdate(
+    const doc = await Group.findByIdAndUpdate(
       req.params.id,
-      { isApproved: true }, // 🔴 IMPORTANTE: Actualizar el Booleano
-      { new: true },
+      { isApproved: true },
+      { new: true }
     );
-    if (!group)
-      throw Object.assign(new Error("Grupo no encontrado"), {
-        statusCode: 404,
-      });
-    res.status(200).json(group);
-  } catch (error) {
-    next(error);
+    if (!doc) return next(notFound("Grupo no encontrado"));
+    res.status(200).json(doc);
+  } catch (err) {
+    next(err);
   }
 };
 
+// DELETE /api/groups/:id  — solo admin
 export const deleteGroup = async (req, res, next) => {
   try {
-    const group = await Group.findByIdAndDelete(req.params.id);
-    if (!group)
-      throw Object.assign(new Error("Grupo no encontrado"), {
-        statusCode: 404,
-      });
-    res.status(200).json({ message: "Grupo eliminado exitosamente" });
-  } catch (error) {
-    next(error);
+    const doc = await Group.findByIdAndDelete(req.params.id);
+    if (!doc) return next(notFound("Grupo no encontrado"));
+    res.status(200).json({ message: "Grupo eliminado" });
+  } catch (err) {
+    next(err);
   }
 };

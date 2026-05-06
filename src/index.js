@@ -1,69 +1,142 @@
-import express from "express";
-import cors from "cors";
-import helmet from "helmet";
-import morgan from "morgan";
-import rateLimit from "express-rate-limit";
-import dotenv from "dotenv";
-
+import express        from "express";
+import cors           from "cors";
+import helmet         from "helmet";
+import morgan         from "morgan";
+import compression    from "compression";
+import rateLimit      from "express-rate-limit";
+import cron           from "node-cron";
+import dotenv         from "dotenv";
 dotenv.config();
 
-// IMPORTACIONES LOCALES (Deben llevar .js al final)
-import connectDB from "./config/mongo.js";
-import { errorHandler } from "./middlewares/errorHandler.js";
+import connectDB            from "./config/mongo.js";
+import { errorHandler }     from "./middlewares/errorHandler.js";
 
-// Importación de Rutas (Asegúrate de que estos archivos también usen export default)
-import announcementRoutes from "./modules/ads/ads.routes.js";
-import resourceRoutes from "./modules/resources/resource.routes.js";
-import groupRoutes from "./modules/groups/group.routes.js";
-import linksRoutes from "./modules/links/link.routes.js";
-import courseRoutes from "./modules/courses/course.routes.js";
-import aiRoutes from "./modules/ais/ai.routes.js";
+// ── Módulos ──────────────────────────────────────────────────────────────────
+import announcementRoutes   from "./modules/ads/ads.routes.js";
+import resourceRoutes       from "./modules/resources/resource.routes.js";
+import groupRoutes          from "./modules/groups/group.routes.js";
+import linksRoutes          from "./modules/links/link.routes.js";
+import courseRoutes         from "./modules/courses/course.routes.js";
+import aiRoutes             from "./modules/ais/ai.routes.js";
+import usersRoutes          from "./modules/users/user.routes.js";
 
 const app = express();
 
-// 1. Conexión a DB
+// ── 1. DB ─────────────────────────────────────────────────────────────────────
 connectDB();
 
-// 2. Seguridad y Middlewares Globales
-app.use(helmet());
+// ── 2. Seguridad ──────────────────────────────────────────────────────────────
+app.set("trust proxy", 1); // Necesario en Render para que rate-limit lea la IP real
+
+app.use(
+  helmet({
+    crossOriginEmbedderPolicy: false, // Permite embeds de YouTube en el frontend
+    contentSecurityPolicy: false,     // El frontend maneja su propia CSP
+  })
+);
+
+const allowedOrigins = (process.env.FRONTEND_URL || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "*",
-    methods: ["GET", "POST", "PUT", "DELETE"],
-  }),
+    origin: (origin, cb) => {
+      // Permite requests sin origin (Postman, mobile apps, curl)
+      if (!origin) return cb(null, true);
+      if (allowedOrigins.length === 0 || allowedOrigins.includes(origin))
+        return cb(null, true);
+      cb(new Error(`CORS bloqueado para origin: ${origin}`));
+    },
+    methods:     ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    credentials: true,
+  })
 );
-app.use(express.json({ limit: "10mb" }));
-app.use(morgan("dev"));
 
-// 3. Limitador de peticiones (Protección DDoS)
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 1000,
-  message: {
-    error: true,
-    message: "Demasiadas peticiones. Intenta más tarde.",
-  },
+// ── 3. Compresión y parseo ────────────────────────────────────────────────────
+app.use(compression());                       // gzip — importante en free tier
+app.use(express.json({ limit: "2mb" }));      // 10mb era demasiado, 2mb es suficiente
+app.use(express.urlencoded({ extended: true, limit: "2mb" }));
+
+// ── 4. Logging ────────────────────────────────────────────────────────────────
+// En producción usamos "combined" (formato Apache, útil para herramientas de monitoreo)
+// En desarrollo, "dev" es más legible
+app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+
+// ── 5. Rate Limiting ──────────────────────────────────────────────────────────
+const baseLimit = rateLimit({
+  windowMs:        15 * 60 * 1000,
+  max:             300,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message:         { error: true, message: "Demasiadas peticiones. Intentá en 15 minutos." },
 });
-app.use("/api", apiLimiter);
 
-// 4. Rutas
+// Límite más estricto para la IA (caro en tokens/créditos)
+const aiLimit = rateLimit({
+  windowMs:        60 * 1000,  // 1 minuto
+  max:             10,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message:         { error: true, message: "Límite del chatbot alcanzado. Esperá 1 minuto." },
+});
+
+app.use("/api", baseLimit);
+app.use("/api/ai", aiLimit);
+
+// ── 6. Rutas ──────────────────────────────────────────────────────────────────
 app.use("/api/announcements", announcementRoutes);
-app.use("/api/resources", resourceRoutes);
-app.use("/api/groups", groupRoutes);
-app.use("/api/links", linksRoutes);
-app.use("/api/courses", courseRoutes);
-app.use("/api/ai", aiRoutes);
+app.use("/api/resources",     resourceRoutes);
+app.use("/api/groups",        groupRoutes);
+app.use("/api/links",         linksRoutes);
+app.use("/api/courses",       courseRoutes);
+app.use("/api/ai",            aiRoutes);
+app.use("/api/users",         usersRoutes);
 
-app.get("/health", (req, res) => {
-  res
-    .status(200)
-    .json({ status: "OK", message: "ITEC Backend funcionando al 100%" });
-});
+// ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
+app.get("/health", (_req, res) =>
+  res.status(200).json({
+    status:    "OK",
+    service:   "iTEC BA Backend",
+    timestamp: new Date().toISOString(),
+    uptime:    Math.floor(process.uptime()),
+  })
+);
 
-// 5. MANEJADOR GLOBAL DE ERRORES (Siempre va al final)
+// ── 8. Anti-sleep: self-ping cada 14 min (Render free duerme a los 15 min) ───
+// Solo activo en producción y si la URL propia está configurada
+if (process.env.NODE_ENV === "production" && process.env.RENDER_EXTERNAL_URL) {
+  const selfUrl = `${process.env.RENDER_EXTERNAL_URL}/health`;
+  cron.schedule("*/14 * * * *", async () => {
+    try {
+      const res = await fetch(selfUrl, { signal: AbortSignal.timeout(8000) });
+      console.log(`🏓 Self-ping OK (${res.status})`);
+    } catch (err) {
+      console.warn("⚠️  Self-ping falló:", err.message);
+    }
+  });
+  console.log(`🏓 Anti-sleep activo → ${selfUrl}`);
+}
+
+// ── 9. 404 para rutas inexistentes ───────────────────────────────────────────
+app.use((_req, res) =>
+  res.status(404).json({ error: true, message: "Endpoint no encontrado" })
+);
+
+// ── 10. Manejador global de errores (SIEMPRE al final) ────────────────────────
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 5001;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor corriendo de forma segura en el puerto ${PORT}`);
+// ── 11. Manejo de rechazos de promesas no capturadas ─────────────────────────
+process.on("unhandledRejection", (reason) => {
+  console.error("⚠️  unhandledRejection:", reason);
 });
+process.on("uncaughtException", (err) => {
+  console.error("💀 uncaughtException:", err);
+  process.exit(1);
+});
+
+const PORT = process.env.PORT || 5001;
+app.listen(PORT, () =>
+  console.log(`🚀 Servidor escuchando en puerto ${PORT} [${process.env.NODE_ENV || "development"}]`)
+);
