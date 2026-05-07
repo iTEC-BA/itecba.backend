@@ -100,8 +100,6 @@ app.use("/api/links", linksRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/users", usersRoutes);
-app.use("/api/rewards", rewardRoutes);
-app.use("/api/messages", messageRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>

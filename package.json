@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "nodemon src/index.js",
+    "start": "node src/index.js",
     "lint": "node --check src/**/*.js || true"
   },
   "keywords": [],
