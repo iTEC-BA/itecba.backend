@@ -79,4 +79,38 @@ export const rewardController = {
       next(error);
     }
   },
+
+  // GET /api/rewards/all — todos los rewards (admin, incluye inactivos)
+  getAllRewards: async (req, res, next) => {
+    try {
+      const rewards = await Reward.find({}).sort({ pointsCost: 1 });
+      res.status(200).json(rewards);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // PUT /api/rewards/:id — actualizar reward (admin)
+  updateReward: async (req, res, next) => {
+    try {
+      const updated = await Reward.findByIdAndUpdate(req.params.id, req.body, {
+        new: true, runValidators: true,
+      });
+      if (!updated) return res.status(404).json({ message: "Reward no encontrado" });
+      res.status(200).json(updated);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // DELETE /api/rewards/:id — eliminar reward (admin)
+  deleteReward: async (req, res, next) => {
+    try {
+      const deleted = await Reward.findByIdAndDelete(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Reward no encontrado" });
+      res.status(200).json({ message: "Reward eliminado" });
+    } catch (error) {
+      next(error);
+    }
+  },
 };

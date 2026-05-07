@@ -19,4 +19,14 @@ router.get(
   requireAdmin,
   rewardController.getAllRedemptions,
 );
+
+// GET /api/rewards/all — todos los rewards (admin, incluye inactivos)
+router.get("/all", verifyToken, requireAdmin, rewardController.getAllRewards);
+
+// PUT /api/rewards/:id — actualizar reward (admin)
+router.put("/:id", verifyToken, requireAdmin, rewardController.updateReward);
+
+// DELETE /api/rewards/:id — eliminar reward (admin)
+router.delete("/:id", verifyToken, requireAdmin, rewardController.deleteReward);
+
 export default router;
