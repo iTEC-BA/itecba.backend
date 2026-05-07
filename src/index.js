@@ -21,6 +21,7 @@ import aiRoutes from "./modules/ais/ai.routes.js";
 import usersRoutes from "./modules/users/user.routes.js";
 import rewardRoutes from "./modules/rewards/reward.routes.js";
 import messageRoutes from "./modules/messages/message.routes.js";
+import materiasRoutes from "./modules/materias/materias.routes.js";
 const app = express();
 
 // ── 1. DB ─────────────────────────────────────────────────────────────────────
@@ -102,6 +103,7 @@ app.use("/api/ai", aiRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/rewards", rewardRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/materias", materiasRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>

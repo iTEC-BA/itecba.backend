@@ -8,7 +8,7 @@ const router = Router();
 
 const linkValidators = [
   body("title").trim().notEmpty().withMessage("Título requerido"),
-  body("url").trim().isURL().withMessage("URL inválida"),
+  body("url").trim().notEmpty().withMessage("URL requerida").custom((val) => { if(!val.startsWith("http") && !val.startsWith("/")) throw new Error("URL inválida"); return true; }),
   body("icon").trim().notEmpty().withMessage("Ícono requerido"),
   body("order").optional().isInt({ min: 0 }).toInt(),
 ];
