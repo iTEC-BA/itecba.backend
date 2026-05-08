@@ -7,11 +7,34 @@ import {
   searchUserByEmail,
   updateUserRole,
   updateUserPoints,
+  updateUserProfile,
 } from "./user.controller.js";
 
 const router = Router();
 
-// Todas las rutas de usuarios son exclusivas de admin
+// ── Ruta del propio usuario (solo verifyToken, SIN requireAdmin) ──────────────
+// IMPORTANTE: debe definirse ANTES del router.use(requireAdmin) de abajo
+router.patch(
+  "/:uid/profile",
+  verifyToken,
+  [
+    body("displayName").optional().trim().isLength({ max: 80 }),
+    body("dni").optional().trim().isLength({ max: 20 }),
+    body("legajo").optional().trim().isLength({ max: 20 }),
+    body("specialty").optional().trim().isLength({ max: 80 }),
+    body("careers").optional().isArray({ max: 2 }),
+    body("startYear")
+      .optional()
+      .isInt({ min: 1990, max: new Date().getFullYear() })
+      .toInt(),
+    body("phone").optional().trim().isLength({ max: 20 }),
+    body("photoURL").optional().trim().isURL(),
+  ],
+  validate,
+  updateUserProfile
+);
+
+// ── Todas las rutas siguientes son exclusivas de admin ────────────────────────
 router.use(verifyToken, requireAdmin);
 
 router.get(

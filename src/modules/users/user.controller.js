@@ -102,3 +102,47 @@ export const updateUserPoints = async (req, res, next) => {
     next(err);
   }
 };
+
+// PATCH /api/users/:uid/profile  — el propio usuario actualiza su perfil extendido
+export const updateUserProfile = async (req, res, next) => {
+  try {
+    const { uid } = req.params;
+
+    // Un usuario solo puede editar su propio perfil (salvo admin)
+    if (uid !== req.user.uid && req.user.role !== "admin") {
+      const { badRequest } = await import("../../middlewares/errorHandler.js");
+      return next(badRequest("Solo podés editar tu propio perfil."));
+    }
+
+    const ALLOWED = [
+      "displayName", "dni", "legajo", "specialty",
+      "careers", "startYear", "photoURL", "phone",
+    ];
+    const update = {};
+    for (const key of ALLOWED) {
+      if (req.body[key] !== undefined) update[key] = req.body[key];
+    }
+
+    if (Object.keys(update).length === 0) {
+      const { badRequest } = await import("../../middlewares/errorHandler.js");
+      return next(badRequest("Sin datos para actualizar."));
+    }
+
+    // Actualizar Firestore (campo name/displayName)
+    const { dbFirebase, authFirebase } = await import("../../config/firebase-admin.js");
+    await dbFirebase.collection("users").doc(uid).set(update, { merge: true });
+
+    // Sincronizar displayName en Firebase Auth si se proveyó
+    if (update.displayName) {
+      await authFirebase.updateUser(uid, { displayName: update.displayName });
+    }
+
+    res.status(200).json({
+      uid,
+      updated: Object.keys(update),
+      message: "Perfil actualizado",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
