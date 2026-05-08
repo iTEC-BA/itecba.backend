@@ -22,7 +22,9 @@ import usersRoutes from "./modules/users/user.routes.js";
 import rewardRoutes from "./modules/rewards/reward.routes.js";
 import messageRoutes from "./modules/messages/message.routes.js";
 import materiasRoutes from "./modules/materias/materias.routes.js";
-import benefitRoutes  from "./modules/benefits/benefit.routes.js";
+import benefitRoutes from "./modules/benefits/benefit.routes.js";
+import faqRoutes from "./modules/faq/faq.routes.js"; // ✅ AÑADIDO: módulo existente que nunca fue registrado
+
 const app = express();
 
 // ── 1. DB ─────────────────────────────────────────────────────────────────────
@@ -59,12 +61,10 @@ app.use(
 
 // ── 3. Compresión y parseo ────────────────────────────────────────────────────
 app.use(compression()); // gzip — importante en free tier
-app.use(express.json({ limit: "2mb" })); // 10mb era demasiado, 2mb es suficiente
+app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
 // ── 4. Logging ────────────────────────────────────────────────────────────────
-// En producción usamos "combined" (formato Apache, útil para herramientas de monitoreo)
-// En desarrollo, "dev" es más legible
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 // ── 5. Rate Limiting ──────────────────────────────────────────────────────────
@@ -104,8 +104,9 @@ app.use("/api/ai", aiRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/rewards", rewardRoutes);
 app.use("/api/messages", messageRoutes);
-app.use("/api/materias",  materiasRoutes);
+app.use("/api/materias", materiasRoutes);
 app.use("/api/benefits", benefitRoutes);
+app.use("/api/faq", faqRoutes); // ✅ AÑADIDO: rutas del módulo FAQ ahora accesibles
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>
@@ -118,7 +119,6 @@ app.get("/health", (_req, res) =>
 );
 
 // ── 8. Anti-sleep: self-ping cada 14 min (Render free duerme a los 15 min) ───
-// Solo activo en producción y si la URL propia está configurada
 if (process.env.NODE_ENV === "production" && process.env.RENDER_EXTERNAL_URL) {
   const selfUrl = `${process.env.RENDER_EXTERNAL_URL}/health`;
   cron.schedule("*/14 * * * *", async () => {

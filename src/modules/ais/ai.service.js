@@ -1,66 +1,58 @@
-import dotenv from "dotenv";
-dotenv.config();
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import AIContext from "./aiContext.model.js";
+import FAQ from "../faq/faq.model.js";
 
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL    = "llama-3.1-8b-instant";
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-const SYSTEM_PROMPT = `
-Sos 'ITEC Bot', el asistente virtual oficial de ITEC BA — la plataforma estudiantil
-de la UTN Facultad Regional Buenos Aires, creada por y para estudiantes.
+const aiService = {
+  getContext: async () => {
+    let ctx = await AIContext.findOne({ singleton: true });
+    if (!ctx) ctx = await AIContext.create({ singleton: true });
+    return ctx;
+  },
 
-PLATAFORMA ITEC BA:
-- Cursos: videos y guías para aprender los temas de las materias
-- Grupos: links de WhatsApp por materia y comisión
-- Aportes (Recursos): resúmenes, parciales y finales de la comunidad
-- Progreso: dashboard para seguir materias aprobadas y promedio
-- TarjeTEC: sistema de puntos por aportar a la comunidad
-
-REGLAS:
-- Respondé en español rioplatense (vos, che), de forma directa y amigable
-- Solo hablás sobre temas universitarios, académicos y de la UTN / ITEC BA
-- Si te pasan "Contexto Oficial", usalo como fuente principal
-- Si no sabés algo, decilo sin inventar
-`.trim();
-
-export const generateAIResponse = async (userText, history = []) => {
-  if (!process.env.GROQ_API_KEY) {
-    throw Object.assign(new Error("GROQ_API_KEY no configurada"), { statusCode: 503 });
-  }
-
-  const messages = [
-    { role: "system", content: SYSTEM_PROMPT },
-    // Convertimos el historial del formato Gemini al formato OpenAI
-    ...history.map((msg) => ({
-      role:    msg.role === "model" ? "assistant" : "user",
-      content: msg.parts?.[0]?.text ?? msg.content ?? "",
-    })),
-    { role: "user", content: userText },
-  ];
-
-  const response = await fetch(GROQ_URL, {
-    method:  "POST",
-    headers: {
-      Authorization:  `Bearer ${process.env.GROQ_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model:       MODEL,
-      messages,
-      temperature: 0.5,
-      max_tokens:  800, // Límite razonable para free tier
-    }),
-    signal: AbortSignal.timeout(30_000), // 30s timeout
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    console.error("Groq error:", response.status, detail);
-    throw Object.assign(
-      new Error("El servicio de IA no está disponible. Intentá más tarde."),
-      { statusCode: 503 }
+  updateContext: async (data) => {
+    const ctx = await AIContext.findOneAndUpdate(
+      { singleton: true },
+      { $set: data },
+      { new: true, upsert: true }
     );
-  }
+    return ctx;
+  },
 
-  const data = await response.json();
-  return data.choices[0].message.content;
+  buildSystemPrompt: async () => {
+    const ctx = await aiService.getContext();
+    const topFaqs = await FAQ.find({ isActive: true }).sort({ popularity: -1 }).limit(15);
+
+    const faqSection = topFaqs.length > 0
+      ? `\n\nPREGUNTAS FRECUENTES DE LA PLATAFORMA:\n${topFaqs.map(f => `P: ${f.question}\nR: ${f.answer}`).join("\n\n")}`
+      : "";
+
+    const rulesSection = ctx.rules?.length > 0
+      ? `\n\nREGLAS:\n${ctx.rules.map((r, i) => `${i + 1}. ${r}`).join("\n")}`
+      : "";
+
+    return `${ctx.personality}\n\n${ctx.institutionalContext}${faqSection}${rulesSection}\n\nIMPORTANTE: Respondé ÚNICAMENTE sobre temas relacionados con UTN FRBA, ITEC BA y la plataforma estudiantil. Si la pregunta no está relacionada, explicalo amablemente. No inventes información. Respondé en español.`;
+  },
+
+  chat: async (message, history = []) => {
+    const systemPrompt = await aiService.buildSystemPrompt();
+    const model = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      systemInstruction: systemPrompt,
+    });
+
+    const chat = model.startChat({
+      history: history.slice(-8).map(h => ({
+        role: h.role === "user" ? "user" : "model",
+        parts: h.parts || [{ text: h.text || "" }],
+      })),
+      generationConfig: { maxOutputTokens: 800, temperature: 0.7 },
+    });
+
+    const result = await chat.sendMessage(message);
+    return result.response.text();
+  },
 };
+
+export default aiService;

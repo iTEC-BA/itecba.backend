@@ -16,6 +16,7 @@ find . -type f \
     -not -name "package-lock.json" \
     -not -name "pnpm-lock.yaml" \
     -not -name "yarn.lock" \
+    -not -name "codigo_backend_ia.txt" \
     -not -name "*.sh" \
     -not -name "$OUTPUT" \
     | while read file; do
