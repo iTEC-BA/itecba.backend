@@ -9,6 +9,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import connectDB from "./config/mongo.js";
+import { initForumDB } from "./config/turso.js"; // <--- NUEVO: Importamos la función de Turso
 import { errorHandler } from "./middlewares/errorHandler.js";
 
 // ── Módulos ──────────────────────────────────────────────────────────────────
@@ -23,12 +24,14 @@ import rewardRoutes from "./modules/rewards/reward.routes.js";
 import messageRoutes from "./modules/messages/message.routes.js";
 import materiasRoutes from "./modules/materias/materias.routes.js";
 import benefitRoutes from "./modules/benefits/benefit.routes.js";
-import faqRoutes from "./modules/faq/faq.routes.js"; // ✅ AÑADIDO: módulo existente que nunca fue registrado
+import faqRoutes from "./modules/faq/faq.routes.js";
+import forumRoutes from "./modules/forum/forum.routes.js";
 
 const app = express();
 
 // ── 1. DB ─────────────────────────────────────────────────────────────────────
 connectDB();
+initForumDB();
 
 // ── 2. Seguridad ──────────────────────────────────────────────────────────────
 app.set("trust proxy", 1); // Necesario en Render para que rate-limit lea la IP real
@@ -106,7 +109,8 @@ app.use("/api/rewards", rewardRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/materias", materiasRoutes);
 app.use("/api/benefits", benefitRoutes);
-app.use("/api/faq", faqRoutes); // ✅ AÑADIDO: rutas del módulo FAQ ahora accesibles
+app.use("/api/faq", faqRoutes);
+app.use("/api/forum", forumRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>
