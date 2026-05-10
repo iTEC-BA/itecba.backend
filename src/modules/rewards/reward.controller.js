@@ -63,7 +63,7 @@ export const rewardController = {
       await redemption.save();
       await pushToUser(req.user.uid, {
         title: "✅ Canje confirmado",
-        body: `Tu canje de ${rewardName} fue procesado. Retiralo en administración.`,
+        body: `Tu canje de ${reward.title} fue procesado. Retiralo en administración.`,
         url: "/perfil",
         source: "rewards",
         priority: "normal",

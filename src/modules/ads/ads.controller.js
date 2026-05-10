@@ -39,7 +39,7 @@ export const createAnnouncement = async (req, res, next) => {
     if (isCritical) {
       await broadcastPush({
         title: `📢 ${title}`,
-        body: body,
+        body: message,
         url: "/",
         source: "news",
         priority: "high",

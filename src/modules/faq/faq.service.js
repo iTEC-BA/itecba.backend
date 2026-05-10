@@ -1,44 +1,46 @@
-// ✅ CORRECCIONES:
-// 1. import default (no nombrado) porque faq.model exporta "export default mongoose.model(...)"
-// 2. Extensión .js agregada (requerida en ESM con "type":"module")
-// 3. module.exports → export default  (el proyecto es ESM puro)
-
-import FAQ from "./faq.model.js"; // ← antes: import { FAQ } from "./faq.model"
+// src/modules/faq/faq.service.js
+import FAQ from "./faq.model.js";
 
 const faqService = {
+  // Todas las FAQs activas, ordenadas por popularidad
   getAll: () =>
     FAQ.find({ isActive: true }).sort({ popularity: -1, createdAt: -1 }),
 
+  // Búsqueda por texto completo + fallback regex
   search: async (query) => {
     if (!query?.trim()) return [];
     const q = query.toLowerCase().trim();
-    // Búsqueda por texto completo + fallback por keywords
+
     const byText = await FAQ.find(
       { $text: { $search: q }, isActive: true },
-      { score: { $meta: "textScore" } },
+      { score: { $meta: "textScore" } }
     )
       .sort({ score: { $meta: "textScore" } })
       .limit(5);
 
     if (byText.length > 0) return byText;
 
-    // Fallback: búsqueda parcial
     return FAQ.find({
       isActive: true,
       $or: [
         { question: { $regex: q, $options: "i" } },
-        { answer: { $regex: q, $options: "i" } },
+        { answer:   { $regex: q, $options: "i" } },
         { keywords: { $in: [new RegExp(q, "i")] } },
       ],
     }).limit(5);
   },
 
-  getTop: () => FAQ.find({ isActive: true }).sort({ popularity: -1 }).limit(8),
+  // Top 15 para contexto de la IA y sugerencias en el chat
+  getTop: () =>
+    FAQ.find({ isActive: true })
+      .sort({ popularity: -1 })
+      .limit(15),
 
+  // CRUD admin
   create: (data, createdBy) =>
     FAQ.create({
       ...data,
-      keywords: data.keywords?.map((k) => k.toLowerCase().trim()) ?? [],
+      keywords:  data.keywords?.map((k) => k.toLowerCase().trim()) ?? [],
       createdBy,
     }),
 
@@ -47,13 +49,11 @@ const faqService = {
 
   delete: (id) => FAQ.findByIdAndDelete(id),
 
+  // Incrementa popularidad en 1 cada vez que una FAQ es consultada
   incrementPopularity: (id) =>
-    FAQ.findByIdAndUpdate(id, { $inc: { popularity: 1 } }),
+    FAQ.findByIdAndUpdate(id, { $inc: { popularity: 1 } }, { new: false }),
 
-  getUnanswered: async () => {
-    // Placeholder: en producción se guardarían las búsquedas sin respuesta en una colección separada
-    return [];
-  },
+  getUnanswered: async () => [],
 };
 
-export default faqService; // ← antes: module.exports = faqService
+export default faqService;
