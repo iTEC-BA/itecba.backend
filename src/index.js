@@ -11,6 +11,7 @@ dotenv.config();
 import connectDB from "./config/mongo.js";
 import { initForumDB } from "./config/turso.js"; // <--- NUEVO: Importamos la función de Turso
 import { errorHandler } from "./middlewares/errorHandler.js";
+import { dbFirebase } from "./config/firebase-admin.js"; // [CALENDAR_CRON]
 
 // ── Módulos ──────────────────────────────────────────────────────────────────
 import announcementRoutes from "./modules/ads/ads.routes.js";
@@ -26,6 +27,7 @@ import materiasRoutes from "./modules/materias/materias.routes.js";
 import benefitRoutes from "./modules/benefits/benefit.routes.js";
 import faqRoutes from "./modules/faq/faq.routes.js";
 import forumRoutes from "./modules/forum/forum.routes.js";
+import calendarRoutes from "./modules/calendar/calendar.routes.js";
 
 const app = express();
 
@@ -111,6 +113,7 @@ app.use("/api/materias", materiasRoutes);
 app.use("/api/benefits", benefitRoutes);
 app.use("/api/faq", faqRoutes);
 app.use("/api/forum", forumRoutes);
+app.use("/api/calendar", calendarRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>
