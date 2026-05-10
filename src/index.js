@@ -9,7 +9,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import connectDB from "./config/mongo.js";
-import { initForumDB } from "./config/turso.js"; // <--- NUEVO: Importamos la función de Turso
+import { initForumDB } from "./config/turso.js";
+import { checkSupabaseConnection } from "./config/supabase.js"; // <--- NUEVO: Importamos la función de Turso
 import { errorHandler } from "./middlewares/errorHandler.js";
 import { dbFirebase } from "./config/firebase-admin.js"; // [CALENDAR_CRON]
 
@@ -34,6 +35,7 @@ const app = express();
 // ── 1. DB ─────────────────────────────────────────────────────────────────────
 connectDB();
 initForumDB();
+checkSupabaseConnection();
 
 // ── 2. Seguridad ──────────────────────────────────────────────────────────────
 app.set("trust proxy", 1); // Necesario en Render para que rate-limit lea la IP real

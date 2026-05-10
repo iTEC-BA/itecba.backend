@@ -75,3 +75,29 @@ export const checkAndSendReminders = async () => {
     console.error("Error en cron de recordatorios:", error);
   }
 };
+
+// ── PATCH /api/calendar/:id ──────────────────────────────────
+export const updateEvent = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { title, description, subtitle, date, type } = req.body;
+
+    const updateData = {};
+    if (title       !== undefined) updateData.title       = title;
+    if (description !== undefined) updateData.description = description;
+    if (subtitle    !== undefined) updateData.subtitle    = subtitle;
+    if (date        !== undefined) updateData.date        = date;
+    if (type        !== undefined) updateData.type        = type;
+
+    const { data, error } = await supabase
+      .from("calendar_events")
+      .update(updateData)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    if (!data) return next(notFound("Evento no encontrado"));
+    res.json(data);
+  } catch (err) { next(err); }
+};
