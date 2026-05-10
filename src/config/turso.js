@@ -17,12 +17,11 @@ export const turso = createClient({
 
 /**
  * Inicializa el schema del foro.
- * Primero crea las bases, luego inyecta columnas nuevas (migraciones),
- * y al final crea los índices de forma segura.
+ * Crea las tablas base, aplica migraciones y crea índices.
  */
 export const initForumDB = async () => {
   try {
-    // 1. Tablas base (solo con las columnas originales de tus primeras pruebas)
+    // 1. Tablas base
     await turso.executeMultiple(`
       CREATE TABLE IF NOT EXISTS anonymous_posts (
         id          INTEGER  PRIMARY KEY AUTOINCREMENT,
@@ -54,31 +53,44 @@ export const initForumDB = async () => {
         subscription  TEXT NOT NULL,
         updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
       );
+
+      CREATE TABLE IF NOT EXISTS forum_banners (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        title         TEXT    NOT NULL,
+        description   TEXT    DEFAULT '',
+        redirect_url  TEXT    NOT NULL,
+        svg_content   TEXT    DEFAULT '',
+        is_active     INTEGER NOT NULL DEFAULT 1,
+        created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
     `);
 
-    // 2. Migraciones seguras: Agregar las columnas nuevas si no existen
+    // 2. Migraciones seguras (columnas nuevas)
     const migrations = [
       `ALTER TABLE anonymous_posts ADD COLUMN root_id INTEGER REFERENCES anonymous_posts(id) ON DELETE CASCADE`,
-      `ALTER TABLE anonymous_posts ADD COLUMN shares INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE anonymous_posts ADD COLUMN shares  INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE anonymous_posts ADD COLUMN reposts INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE anonymous_posts ADD COLUMN views   INTEGER NOT NULL DEFAULT 0`,
     ];
 
     for (const sql of migrations) {
       try {
         await turso.execute(sql);
       } catch (e) {
-        // Si el error es por "duplicate column name", lo ignoramos silenciosamente porque ya existe.
         if (!e.message?.includes("duplicate column")) {
           console.warn("⚠️ [TURSO] Aviso de migración:", e.message);
         }
       }
     }
 
-    // 3. Crear los índices SOLO cuando sabemos que las columnas definitivamente ya existen
+    // 3. Índices
     await turso.executeMultiple(`
-      CREATE INDEX IF NOT EXISTS idx_posts_parent ON anonymous_posts(parent_id);
-      CREATE INDEX IF NOT EXISTS idx_posts_root   ON anonymous_posts(root_id);
-      CREATE INDEX IF NOT EXISTS idx_posts_expires ON anonymous_posts(expires_at);
+      CREATE INDEX IF NOT EXISTS idx_posts_parent   ON anonymous_posts(parent_id);
+      CREATE INDEX IF NOT EXISTS idx_posts_root     ON anonymous_posts(root_id);
+      CREATE INDEX IF NOT EXISTS idx_posts_expires  ON anonymous_posts(expires_at);
+      CREATE INDEX IF NOT EXISTS idx_posts_upvotes  ON anonymous_posts(upvotes DESC);
+      CREATE INDEX IF NOT EXISTS idx_banners_active ON forum_banners(is_active);
     `);
 
     console.log("🟢 [TURSO] Schema del foro inicializado correctamente.");

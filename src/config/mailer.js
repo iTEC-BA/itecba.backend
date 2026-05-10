@@ -8,7 +8,10 @@ if (!EMAIL_USER || !EMAIL_PASS) {
 }
 
 export const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
+  family: 4,
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS,
