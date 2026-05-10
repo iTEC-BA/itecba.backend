@@ -1,5 +1,6 @@
 import { Benefit } from "./benefit.model.js";
 import { badRequest, notFound } from "../../middlewares/errorHandler.js";
+import { broadcastPush } from "../notifications/notification.controller.js";
 
 // GET /api/benefits — público
 export const getBenefits = async (req, res, next) => {
@@ -7,7 +8,10 @@ export const getBenefits = async (req, res, next) => {
     const filter = {};
     if (req.query.category) filter.category = req.query.category;
     filter.isActive = true;
-    const benefits = await Benefit.find(filter).sort({ order: 1, createdAt: -1 });
+    const benefits = await Benefit.find(filter).sort({
+      order: 1,
+      createdAt: -1,
+    });
     res.status(200).json({ benefits });
   } catch (err) {
     next(err);
@@ -27,11 +31,26 @@ export const getAllBenefits = async (req, res, next) => {
 // POST /api/benefits — admin
 export const createBenefit = async (req, res, next) => {
   try {
-    const { title, discount, location, category, description, logoUrl, order } = req.body;
+    const { title, discount, location, category, description, logoUrl, order } =
+      req.body;
     if (!title || !discount || !category)
       return next(badRequest("title, discount y category son requeridos"));
     const benefit = await Benefit.create({
-      title, discount, location, category, description, logoUrl, order: order || 0,
+      title,
+      discount,
+      location,
+      category,
+      description,
+      logoUrl,
+      order: order || 0,
+    });
+    // Al final de createBenefit():
+    await broadcastPush({
+      title: "🎁 Nuevo beneficio disponible",
+      body: `${title} — Descuento exclusivo para estudiantes iTEC`,
+      url: "/perfil",
+      source: "benefits",
+      priority: "normal",
     });
     res.status(201).json({ benefit });
   } catch (err) {
@@ -43,7 +62,8 @@ export const createBenefit = async (req, res, next) => {
 export const updateBenefit = async (req, res, next) => {
   try {
     const benefit = await Benefit.findByIdAndUpdate(req.params.id, req.body, {
-      new: true, runValidators: true,
+      new: true,
+      runValidators: true,
     });
     if (!benefit) return next(notFound("Beneficio no encontrado"));
     res.status(200).json({ benefit });
@@ -58,7 +78,7 @@ export const deleteBenefit = async (req, res, next) => {
     const benefit = await Benefit.findByIdAndUpdate(
       req.params.id,
       { isActive: false },
-      { new: true }
+      { new: true },
     );
     if (!benefit) return next(notFound("Beneficio no encontrado"));
     res.status(200).json({ message: "Beneficio desactivado", benefit });

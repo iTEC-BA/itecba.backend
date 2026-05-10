@@ -2,6 +2,7 @@ import { Reward } from "./reward.model.js";
 import { Redemption } from "./redemption.model.js";
 import { dbFirebase } from "../../config/firebase-admin.js";
 import admin from "firebase-admin";
+import { broadcastPush } from "../notifications/notification.controller.js";
 
 export const rewardController = {
   getRewards: async (req, res, next) => {
@@ -60,7 +61,13 @@ export const rewardController = {
         payload,
       });
       await redemption.save();
-
+      await pushToUser(req.user.uid, {
+        title: "✅ Canje confirmado",
+        body: `Tu canje de ${rewardName} fue procesado. Retiralo en administración.`,
+        url: "/perfil",
+        source: "rewards",
+        priority: "normal",
+      });
       res.status(200).json({
         success: true,
         newBalance: currentPoints - reward.pointsCost,
@@ -94,9 +101,12 @@ export const rewardController = {
   updateReward: async (req, res, next) => {
     try {
       const updated = await Reward.findByIdAndUpdate(req.params.id, req.body, {
-        new: true, runValidators: true,
+        new: true,
+        runValidators: true,
       });
-      if (!updated) return res.status(404).json({ message: "Reward no encontrado" });
+      if (!updated)
+        return res.status(404).json({ message: "Reward no encontrado" });
+      
       res.status(200).json(updated);
     } catch (error) {
       next(error);
@@ -107,7 +117,8 @@ export const rewardController = {
   deleteReward: async (req, res, next) => {
     try {
       const deleted = await Reward.findByIdAndDelete(req.params.id);
-      if (!deleted) return res.status(404).json({ message: "Reward no encontrado" });
+      if (!deleted)
+        return res.status(404).json({ message: "Reward no encontrado" });
       res.status(200).json({ message: "Reward eliminado" });
     } catch (error) {
       next(error);

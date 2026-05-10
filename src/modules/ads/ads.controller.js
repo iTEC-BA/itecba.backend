@@ -1,6 +1,6 @@
 import Announcement from "./ads.model.js";
 import { badRequest, notFound } from "../../middlewares/errorHandler.js";
-
+import { broadcastPush } from "../notifications/notification.controller.js";
 // GET /api/announcements/active
 export const getActiveAnnouncement = async (req, res, next) => {
   try {
@@ -8,7 +8,7 @@ export const getActiveAnnouncement = async (req, res, next) => {
     const now = new Date();
     await Announcement.updateMany(
       { active: true, expiresAt: { $lte: now } },
-      { active: false }
+      { active: false },
     );
 
     const announcements = await Announcement.find({ active: true })
@@ -36,6 +36,15 @@ export const createAnnouncement = async (req, res, next) => {
       expiresAt,
     });
 
+    if (isCritical) {
+      await broadcastPush({
+        title: `📢 ${title}`,
+        body: body,
+        url: "/",
+        source: "news",
+        priority: "high",
+      });
+    }
     res.status(201).json(doc);
   } catch (err) {
     next(err);
@@ -48,7 +57,7 @@ export const deactivateAnnouncement = async (req, res, next) => {
     const doc = await Announcement.findByIdAndUpdate(
       req.params.id,
       { active: false },
-      { new: true }
+      { new: true },
     );
     if (!doc) return next(notFound("Anuncio no encontrado"));
     res.status(200).json(doc);

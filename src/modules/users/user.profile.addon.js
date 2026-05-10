@@ -4,7 +4,7 @@
 
 import { dbFirebase, authFirebase } from "../../config/firebase-admin.js";
 import { badRequest } from "../../middlewares/errorHandler.js";
-
+import { pushToUser } from '../notifications/notification.controller.js';
 /**
  * Actualiza el perfil extendido del usuario en Firestore.
  * Solo el propio usuario puede actualizar su perfil (salvo admin).
@@ -44,7 +44,3 @@ export const updateUserProfile = async (req, res, next) => {
     next(err);
   }
 };
-
-// En user.routes.js agregar:
-// import { updateUserProfile } from "./user.profile.addon.js";
-// router.patch("/:uid/profile", verifyToken, validate, updateUserProfile);

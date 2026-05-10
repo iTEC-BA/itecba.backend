@@ -29,13 +29,18 @@ import benefitRoutes from "./modules/benefits/benefit.routes.js";
 import faqRoutes from "./modules/faq/faq.routes.js";
 import forumRoutes from "./modules/forum/forum.routes.js";
 import calendarRoutes from "./modules/calendar/calendar.routes.js";
+import notificationRoutes from "./modules/notifications/notification.routes.js";
+import { initWebPush } from "./modules/notifications/notification.controller.js";
 
 const app = express();
 
-// ── 1. DB ─────────────────────────────────────────────────────────────────────
+// ── 0. DB ─────────────────────────────────────────────────────────────────────
 connectDB();
 initForumDB();
 checkSupabaseConnection();
+
+// ── 1. notificaciones ─────────────────────────────────────────────────────────────────────
+initWebPush();
 
 // ── 2. Seguridad ──────────────────────────────────────────────────────────────
 app.set("trust proxy", 1); // Necesario en Render para que rate-limit lea la IP real
@@ -116,6 +121,7 @@ app.use("/api/benefits", benefitRoutes);
 app.use("/api/faq", faqRoutes);
 app.use("/api/forum", forumRoutes);
 app.use("/api/calendar", calendarRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>
