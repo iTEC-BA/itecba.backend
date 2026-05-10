@@ -110,7 +110,6 @@ export const updateUserProfile = async (req, res, next) => {
 
     // Un usuario solo puede editar su propio perfil (salvo admin)
     if (uid !== req.user.uid && req.user.role !== "admin") {
-      const { badRequest } = await import("../../middlewares/errorHandler.js");
       return next(badRequest("Solo podés editar tu propio perfil."));
     }
 
@@ -124,12 +123,10 @@ export const updateUserProfile = async (req, res, next) => {
     }
 
     if (Object.keys(update).length === 0) {
-      const { badRequest } = await import("../../middlewares/errorHandler.js");
       return next(badRequest("Sin datos para actualizar."));
     }
 
     // Actualizar Firestore (campo name/displayName)
-    const { dbFirebase, authFirebase } = await import("../../config/firebase-admin.js");
     await dbFirebase.collection("users").doc(uid).set(update, { merge: true });
 
     // Sincronizar displayName en Firebase Auth si se proveyó

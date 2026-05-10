@@ -1,49 +1,63 @@
 // src/modules/forum/forum.routes.js
-import { Router }                       from "express";
-import { body, query, param }           from "express-validator";
-import { validate }                     from "../../middlewares/validate.js";
-import { verifyToken, requireAdmin }    from "../../middlewares/authMiddleware.js";
+import { Router }                    from "express";
+import { body, query }               from "express-validator";
+import { validate }                  from "../../middlewares/validate.js";
+import { verifyToken, requireAdmin } from "../../middlewares/authMiddleware.js";
 import {
-  getPosts,
-  getThread,
-  createPost,
-  createReply,
-  votePost,
-  repostPost,
-  getTrending,
-  deletePost,
-  getBanners,
-  createBanner,
-  updateBanner,
-  deleteBanner,
-  savePushSubscription,
-  getVapidPublicKey,
+  getPosts, getThread,
+  createPost, createReply,
+  votePost, repostPost,
+  getTrending, deletePost,
+  getBanners, createBanner, updateBanner, deleteBanner,
+  savePushSubscription, getVapidPublicKey,
 } from "./forum.controller.js";
 
 const router = Router();
 
-// ── Push ─────────────────────────────────────────────────────────────────────
-router.get("/push/vapid-key",    getVapidPublicKey);
-router.post("/push/subscribe",   verifyToken, savePushSubscription);
+// ── Push ──────────────────────────────────────────────────────
+router.get("/push/vapid-key",   getVapidPublicKey);
+router.post("/push/subscribe",  verifyToken, savePushSubscription);
 
-// ── Feed y posts ─────────────────────────────────────────────────────────────
+// ── Feed (opcionalmente autenticado para mostrar votos propios) ─
 router.get(
   "/posts",
   [
     query("page").optional().isInt({ min: 1 }).toInt(),
-    query("tab").optional().isIn(["para-ti", "siguiendo", "utn-ba", "tendencias"]),
+    query("tab").optional().isIn([
+      "para-ti", "siguiendo", "utn-ba", "tendencias", "materias",
+    ]),
   ],
   validate,
+  // verifyToken opcional — lo manejamos inside del controller con req.user ?? null
+  (req, _res, next) => {
+    // Si hay token, lo verificamos; si no, continuamos sin usuario.
+    const header = req.headers.authorization;
+    if (header?.startsWith("Bearer ")) {
+      return verifyToken(req, _res, next);
+    }
+    next();
+  },
   getPosts,
 );
 
-router.get("/posts/:id",  getThread);
+// ── Thread (opcionalmente autenticado) ───────────────────────
+router.get(
+  "/posts/:id",
+  (req, _res, next) => {
+    const header = req.headers.authorization;
+    if (header?.startsWith("Bearer ")) return verifyToken(req, _res, next);
+    next();
+  },
+  getThread,
+);
 
+// ── Crear post / respuesta ─────────────────────────────────
 router.post(
   "/posts",
   verifyToken,
   [
-    body("body").trim().notEmpty().isLength({ min: 3, max: 1000 })
+    body("body")
+      .trim().notEmpty().isLength({ min: 3, max: 1000 })
       .withMessage("El contenido debe tener entre 3 y 1000 caracteres"),
     body("parent_id").optional().isInt({ min: 1 }).toInt(),
   ],
@@ -54,28 +68,41 @@ router.post(
 router.post(
   "/posts/:id/replies",
   verifyToken,
-  [body("body").trim().notEmpty().isLength({ min: 3, max: 1000 })],
+  [
+    body("body")
+      .trim().notEmpty().isLength({ min: 3, max: 1000 })
+      .withMessage("La respuesta debe tener entre 3 y 1000 caracteres"),
+  ],
   validate,
   createReply,
 );
 
+// ── Votar ─────────────────────────────────────────────────
 router.post(
   "/posts/:id/vote",
   verifyToken,
-  [body("value").isIn([1, -1]).toInt()],
+  [body("value").isIn([1, -1]).toInt().withMessage("value debe ser 1 o -1")],
   validate,
   votePost,
 );
 
-router.post("/posts/:id/repost", verifyToken, repostPost);   // ← NUEVO
+// ── Repostear / Eliminar ──────────────────────────────────
+router.post("/posts/:id/repost", verifyToken, repostPost);
+router.delete("/posts/:id",      verifyToken, deletePost);
 
-router.delete("/posts/:id", verifyToken, deletePost);
+// ── Trending (público) ────────────────────────────────────
+router.get(
+  "/trending",
+  (req, _res, next) => {
+    const header = req.headers.authorization;
+    if (header?.startsWith("Bearer ")) return verifyToken(req, _res, next);
+    next();
+  },
+  getTrending,
+);
 
-// ── Trending ─────────────────────────────────────────────────────────────────
-router.get("/trending", getTrending);                         // ← NUEVO
-
-// ── Banners CRUD ─────────────────────────────────────────────────────────────
-router.get("/banners", getBanners);                           // ← NUEVO
+// ── Banners ───────────────────────────────────────────────
+router.get("/banners", getBanners);
 
 router.post(
   "/banners",
@@ -89,7 +116,7 @@ router.post(
   ],
   validate,
   createBanner,
-);                                                            // ← NUEVO
+);
 
 router.patch(
   "/banners/:id",
@@ -103,8 +130,8 @@ router.patch(
   ],
   validate,
   updateBanner,
-);                                                            // ← NUEVO
+);
 
-router.delete("/banners/:id", verifyToken, requireAdmin, deleteBanner); // ← NUEVO
+router.delete("/banners/:id", verifyToken, requireAdmin, deleteBanner);
 
 export default router;

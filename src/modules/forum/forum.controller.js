@@ -1,19 +1,15 @@
 // src/modules/forum/forum.controller.js
-import crypto  from "crypto";
+import crypto  from "node:crypto";
 import webpush from "web-push";
-import { turso }              from "../../config/turso.js";
-import { badRequest, notFound } from "../../middlewares/errorHandler.js";
+import { turso } from "../../config/turso.js";
+import { notFound, badRequest, forbidden } from "../../middlewares/errorHandler.js";
 
-// ── VAPID Setup ───────────────────────────────────────────────────────────────
-if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-  webpush.setVapidDetails(
-    process.env.VAPID_EMAIL || "mailto:admin@itecba.com",
-    process.env.VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY,
-  );
-}
+// ── VAPID se inicializa globalmente en notification.controller.js (initWebPush) ──
+// No re-inicializar aquí para evitar duplicados.
 
-// ── Pseudónimos deterministas ─────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════
+// PSEUDÓNIMOS DETERMINISTAS (SHA-256 + salt)
+// ════════════════════════════════════════════════════════════
 const ADJECTIVES = [
   "Valiente","Curioso","Brillante","Furioso","Sereno","Audaz","Veloz","Sabio",
   "Astuto","Tenaz","Ágil","Firme","Perspicaz","Osado","Prudente","Ingenioso",
@@ -39,10 +35,13 @@ const hashUid = (uid) => {
   return crypto.createHash("sha256").update(uid + salt + "hash").digest("hex").slice(0, 32);
 };
 
-// ── Filtro de malas palabras ──────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════
+// FILTRO DE MALAS PALABRAS
+// ════════════════════════════════════════════════════════════
 const BAD_WORDS = [
   "pelotudo","boludo","forro","idiota","imbecil","estupido","tarado","cretino",
-  "inutil","hdp","mierda","puto","puta","carajo",
+  "inutil","hdp","mierda","puto","puta","carajo","concha","culo","pija",
+  "choto","reverendo",
 ];
 const containsBadWords = (text) => {
   const lower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -51,66 +50,89 @@ const containsBadWords = (text) => {
   );
 };
 
+// ════════════════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════════════════
 const EXPIRY_MONTHS = 6;
 const expiresAt = () => {
   const d = new Date();
   d.setMonth(d.getMonth() + EXPIRY_MONTHS);
   return d.toISOString().replace("T", " ").slice(0, 19);
 };
-
 const now = () => new Date().toISOString().replace("T", " ").slice(0, 19);
-
 const PAGE_SIZE = 20;
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  POSTS — GET (feed paginado)
-// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * Envía push notification a un user_hash específico (silencioso en error).
+ * @param {string}  userHash  - hash del destinatario
+ * @param {object}  payload   - { title, body, url }
+ */
+const sendPushToHash = async (userHash, payload) => {
+  try {
+    const { rows: subs } = await turso.execute({
+      sql:  "SELECT subscription FROM push_subscriptions WHERE user_hash = ?1",
+      args: [userHash],
+    });
+    if (!subs.length) return;
+    const sub = JSON.parse(subs[0].subscription);
+    await webpush.sendNotification(sub, JSON.stringify(payload));
+  } catch (_) { /* Silencioso — suscripción expirada o VAPID no listo */ }
+};
+
+// ════════════════════════════════════════════════════════════
+// GET /api/forum/posts?tab=para-ti&page=1
+// Tabs soportados: para-ti | tendencias | materias | siguiendo
+// ════════════════════════════════════════════════════════════
 export const getPosts = async (req, res, next) => {
   try {
-    const page     = Math.max(1, parseInt(req.query.page)  || 1);
+    const page     = Math.max(1, parseInt(req.query.page) || 1);
     const tab      = req.query.tab || "para-ti";
     const offset   = (page - 1) * PAGE_SIZE;
     const userHash = req.user ? hashUid(req.user.uid) : null;
 
-    // Ordenamiento según tab
-    const order =
-      tab === "tendencias"
-        ? "p.upvotes DESC, reply_count DESC, p.created_at DESC"
-        : "p.created_at DESC";
+    // ── Orden según tab ───────────────────────────────────
+    const order = tab === "tendencias"
+      ? "p.upvotes DESC, reply_count DESC, p.created_at DESC"
+      : "p.created_at DESC";
 
-    const voteSql = userHash
-      ? ", (SELECT value FROM post_votes WHERE user_hash = ?1 AND post_id = p.id) AS user_vote"
-      : ", 0 AS user_vote";
-
-    const repostSql = userHash
-      ? `, EXISTS(SELECT 1 FROM post_reposts WHERE user_hash = ?${userHash ? "1" : "x"} AND post_id = p.id) AS is_reposted`
-      : ", 0 AS is_reposted";
+    // ── Filtro adicional para el tab "materias" ───────────
+    // Muestra posts que contienen al menos un #hashtag (proxy de materia)
+    const materiaFilter = tab === "materias"
+      ? "AND p.body LIKE '%#%'"
+      : "";
 
     const args = userHash ? [userHash] : [];
 
     const { rows } = await turso.execute({
       sql: `
         SELECT p.id, p.pseudonym, p.body, p.upvotes, p.reposts, p.shares, p.views,
-               p.created_at,
+               p.created_at, p.user_hash,
                (SELECT COUNT(*) FROM anonymous_posts r WHERE r.parent_id = p.id) AS reply_count
-               ${voteSql}
                ${userHash
-                 ? `, EXISTS(SELECT 1 FROM post_reposts WHERE user_hash = ?1 AND post_id = p.id) AS is_reposted`
-                 : `, 0 AS is_reposted`}
+                 ? `, (SELECT value FROM post_votes WHERE user_hash = ?1 AND post_id = p.id) AS user_vote,
+                    EXISTS(SELECT 1 FROM post_reposts WHERE user_hash = ?1 AND post_id = p.id) AS is_reposted`
+                 : `, 0 AS user_vote, 0 AS is_reposted`}
         FROM anonymous_posts p
-        WHERE p.parent_id IS NULL AND p.expires_at > datetime('now')
+        WHERE p.parent_id IS NULL
+          AND p.expires_at > datetime('now')
+          ${materiaFilter}
         ORDER BY ${order}
         LIMIT ${PAGE_SIZE} OFFSET ${offset}
       `,
       args,
     });
 
-    const { rows: countRows } = await turso.execute(
-      "SELECT COUNT(*) AS total FROM anonymous_posts WHERE parent_id IS NULL AND expires_at > datetime('now')"
-    );
+    const { rows: countRows } = await turso.execute({
+      sql:  `SELECT COUNT(*) AS total FROM anonymous_posts
+             WHERE parent_id IS NULL AND expires_at > datetime('now') ${materiaFilter}`,
+      args: [],
+    });
 
     res.status(200).json({
-      posts:    rows,
+      posts: rows.map(({ user_hash, ...p }) => ({
+        ...p,
+        is_author: userHash ? user_hash === userHash : false,
+      })),
       total:    Number(countRows[0].total),
       page,
       pageSize: PAGE_SIZE,
@@ -119,20 +141,22 @@ export const getPosts = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  POSTS — GET (hilo)
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// GET /api/forum/posts/:id — Thread completo
+// ════════════════════════════════════════════════════════════
 export const getThread = async (req, res, next) => {
   try {
     const { id }   = req.params;
     const userHash = req.user ? hashUid(req.user.uid) : null;
 
-    // Incrementar vistas (fire-and-forget)
-    turso.execute({ sql: `UPDATE anonymous_posts SET views = views + 1 WHERE id = ?1`, args: [id] })
-      .catch(() => {});
+    // Incrementar vistas en background (fire & forget)
+    turso.execute({
+      sql: "UPDATE anonymous_posts SET views = views + 1 WHERE id = ?1",
+      args: [id],
+    }).catch(() => {});
 
     const { rows: postRows } = await turso.execute({
-      sql: `SELECT * FROM anonymous_posts WHERE id = ?1 AND expires_at > datetime('now')`,
+      sql:  "SELECT * FROM anonymous_posts WHERE id = ?1 AND expires_at > datetime('now')",
       args: [id],
     });
     if (!postRows.length) return next(notFound("Post no encontrado o expirado"));
@@ -151,13 +175,20 @@ export const getThread = async (req, res, next) => {
       args: userHash ? [userHash, id] : [id],
     });
 
-    res.status(200).json({ post: postRows[0], replies: replyRows });
+    const { user_hash: _ph, ...postClean } = postRows[0];
+    res.status(200).json({
+      post:    { ...postClean, is_author: userHash ? _ph === userHash : false },
+      replies: replyRows.map(({ user_hash: rh, ...r }) => ({
+        ...r,
+        is_author: userHash ? rh === userHash : false,
+      })),
+    });
   } catch (err) { next(err); }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  POSTS — POST (crear)
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// POST /api/forum/posts — Crear publicación
+// ════════════════════════════════════════════════════════════
 export const createPost = async (req, res, next) => {
   try {
     const { body, parent_id } = req.body;
@@ -175,28 +206,49 @@ export const createPost = async (req, res, next) => {
     const exp       = expiresAt();
 
     const { lastInsertRowid } = await turso.execute({
-      sql: `INSERT INTO anonymous_posts (parent_id, pseudonym, user_hash, body, expires_at) VALUES (?, ?, ?, ?, ?)`,
+      sql:  "INSERT INTO anonymous_posts (parent_id, pseudonym, user_hash, body, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)",
       args: [parent_id || null, pseudonym, userHash, body.trim(), exp],
     });
 
+    // ── Push al autor del post padre si es respuesta ──────
+    if (parent_id) {
+      try {
+        const { rows: pRows } = await turso.execute({
+          sql:  "SELECT user_hash FROM anonymous_posts WHERE id = ?1",
+          args: [parent_id],
+        });
+        const pH = pRows[0]?.user_hash;
+        if (pH && pH !== userHash) {
+          await sendPushToHash(pH, {
+            title: "📬 iTEC Foro",
+            body:  `${pseudonym} respondió a tu publicación.`,
+            url:   `/foro/${parent_id}`,
+          });
+        }
+      } catch (_) { /* Silencioso */ }
+    }
+
     res.status(201).json({
-      message: "Publicado con éxito",
-      id: Number(lastInsertRowid),
+      message:     "Publicado con éxito",
+      id:          Number(lastInsertRowid),
+      parent_id:   parent_id || null,
       pseudonym,
-      body: body.trim(),
-      upvotes: 0,
-      reposts: 0,
-      shares: 0,
-      views: 0,
+      body:        body.trim(),
+      upvotes:     0,
+      reposts:     0,
+      shares:      0,
+      views:       0,
       reply_count: 0,
-      created_at: new Date().toISOString(),
+      created_at:  new Date().toISOString(),
+      user_vote:   null,
+      is_reposted: false,
     });
-  } catch (error) { next(error); }
+  } catch (err) { next(err); }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  REPLIES — POST (responder)
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// POST /api/forum/posts/:id/replies — Responder a un post
+// ════════════════════════════════════════════════════════════
 export const createReply = async (req, res, next) => {
   try {
     const { id }   = req.params;
@@ -210,7 +262,7 @@ export const createReply = async (req, res, next) => {
       return next(badRequest("Tu respuesta contiene lenguaje inapropiado."));
 
     const { rows: parentRows } = await turso.execute({
-      sql: `SELECT id, user_hash FROM anonymous_posts WHERE id = ?1 AND expires_at > datetime('now')`,
+      sql:  "SELECT id, user_hash FROM anonymous_posts WHERE id = ?1 AND expires_at > datetime('now')",
       args: [id],
     });
     if (!parentRows.length) return next(notFound("Post padre no encontrado o expirado"));
@@ -220,44 +272,37 @@ export const createReply = async (req, res, next) => {
     const exp       = expiresAt();
 
     const { lastInsertRowid } = await turso.execute({
-      sql: `INSERT INTO anonymous_posts (parent_id, pseudonym, user_hash, body, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)`,
+      sql:  "INSERT INTO anonymous_posts (parent_id, pseudonym, user_hash, body, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)",
       args: [id, pseudonym, userHash, body.trim(), exp],
     });
 
-    // Web Push al autor original
-    const parentUserHash = parentRows[0].user_hash;
-    if (parentUserHash !== userHash) {
-      try {
-        const { rows: subRows } = await turso.execute({
-          sql: `SELECT subscription FROM push_subscriptions WHERE user_hash = ?1`,
-          args: [parentUserHash],
-        });
-        if (subRows.length) {
-          const subscription = JSON.parse(subRows[0].subscription);
-          await webpush.sendNotification(subscription, JSON.stringify({
-            title: "📬 iTEC Foro",
-            body:  `${pseudonym} respondió a tu publicación.`,
-            url:   `/foro`,
-          }));
-        }
-      } catch (_e) { /* Silencioso */ }
+    // ── Push al autor del post original ───────────────────
+    const parentHash = parentRows[0].user_hash;
+    if (parentHash !== userHash) {
+      await sendPushToHash(parentHash, {
+        title: "📬 iTEC Foro",
+        body:  `${pseudonym} respondió a tu publicación.`,
+        url:   `/foro/${id}`,
+      });
     }
 
     res.status(201).json({
-      id: Number(lastInsertRowid),
-      parent_id: Number(id),
+      id:          Number(lastInsertRowid),
+      parent_id:   Number(id),
       pseudonym,
-      body: body.trim(),
-      upvotes: 0,
-      created_at: new Date().toISOString(),
+      body:        body.trim(),
+      upvotes:     0,
       reply_count: 0,
+      user_vote:   null,
+      is_reposted: false,
+      created_at:  new Date().toISOString(),
     });
   } catch (err) { next(err); }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  VOTAR — POST
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// POST /api/forum/posts/:id/vote — Votar (toggle)
+// ════════════════════════════════════════════════════════════
 export const votePost = async (req, res, next) => {
   try {
     const { id }    = req.params;
@@ -267,7 +312,7 @@ export const votePost = async (req, res, next) => {
     if (![1, -1].includes(Number(value))) return next(badRequest("value debe ser 1 o -1"));
 
     const { rows: prevRows } = await turso.execute({
-      sql:  `SELECT value FROM post_votes WHERE user_hash = ?1 AND post_id = ?2`,
+      sql:  "SELECT value FROM post_votes WHERE user_hash = ?1 AND post_id = ?2",
       args: [userHash, id],
     });
 
@@ -275,88 +320,107 @@ export const votePost = async (req, res, next) => {
     if (prevRows.length) {
       const prevValue = Number(prevRows[0].value);
       if (prevValue === Number(value)) {
-        await turso.execute({ sql: `DELETE FROM post_votes WHERE user_hash = ?1 AND post_id = ?2`, args: [userHash, id] });
+        await turso.execute({
+          sql:  "DELETE FROM post_votes WHERE user_hash = ?1 AND post_id = ?2",
+          args: [userHash, id],
+        });
         delta = -prevValue;
       } else {
-        await turso.execute({ sql: `UPDATE post_votes SET value = ?1 WHERE user_hash = ?2 AND post_id = ?3`, args: [value, userHash, id] });
+        await turso.execute({
+          sql:  "UPDATE post_votes SET value = ?1 WHERE user_hash = ?2 AND post_id = ?3",
+          args: [value, userHash, id],
+        });
         delta = Number(value) - prevValue;
       }
     } else {
-      await turso.execute({ sql: `INSERT INTO post_votes (user_hash, post_id, value) VALUES (?1, ?2, ?3)`, args: [userHash, id, value] });
+      await turso.execute({
+        sql:  "INSERT INTO post_votes (user_hash, post_id, value) VALUES (?1, ?2, ?3)",
+        args: [userHash, id, value],
+      });
       delta = Number(value);
     }
 
-    await turso.execute({ sql: `UPDATE anonymous_posts SET upvotes = upvotes + ?1 WHERE id = ?2`, args: [delta, id] });
-    const { rows } = await turso.execute({ sql: `SELECT upvotes FROM anonymous_posts WHERE id = ?1`, args: [id] });
+    await turso.execute({
+      sql:  "UPDATE anonymous_posts SET upvotes = upvotes + ?1 WHERE id = ?2",
+      args: [delta, id],
+    });
+    const { rows } = await turso.execute({
+      sql:  "SELECT upvotes FROM anonymous_posts WHERE id = ?1",
+      args: [id],
+    });
 
     res.status(200).json({ upvotes: Number(rows[0]?.upvotes ?? 0) });
   } catch (err) { next(err); }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  REPOST — POST  ← NUEVO
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// POST /api/forum/posts/:id/repost — Repostear (toggle)
+// ════════════════════════════════════════════════════════════
 export const repostPost = async (req, res, next) => {
   try {
     const { id }   = req.params;
     const userHash = hashUid(req.user.uid);
 
-    // Verificar que el post existe
     const { rows: postRows } = await turso.execute({
-      sql:  `SELECT id, reposts FROM anonymous_posts WHERE id = ?1 AND expires_at > datetime('now')`,
+      sql:  "SELECT id, reposts FROM anonymous_posts WHERE id = ?1 AND expires_at > datetime('now')",
       args: [id],
     });
     if (!postRows.length) return next(notFound("Post no encontrado o expirado"));
 
-    // Toggle repost
     const { rows: existing } = await turso.execute({
-      sql:  `SELECT 1 FROM post_reposts WHERE user_hash = ?1 AND post_id = ?2`,
+      sql:  "SELECT 1 FROM post_reposts WHERE user_hash = ?1 AND post_id = ?2",
       args: [userHash, id],
     });
 
     let is_reposted;
     if (existing.length) {
-      // Desrepostear
-      await turso.execute({ sql: `DELETE FROM post_reposts WHERE user_hash = ?1 AND post_id = ?2`, args: [userHash, id] });
-      await turso.execute({ sql: `UPDATE anonymous_posts SET reposts = MAX(0, reposts - 1) WHERE id = ?1`, args: [id] });
+      await turso.execute({
+        sql:  "DELETE FROM post_reposts WHERE user_hash = ?1 AND post_id = ?2",
+        args: [userHash, id],
+      });
+      await turso.execute({
+        sql:  "UPDATE anonymous_posts SET reposts = MAX(0, reposts - 1) WHERE id = ?1",
+        args: [id],
+      });
       is_reposted = false;
     } else {
-      // Repostear
-      await turso.execute({ sql: `INSERT INTO post_reposts (user_hash, post_id) VALUES (?1, ?2)`, args: [userHash, id] });
-      await turso.execute({ sql: `UPDATE anonymous_posts SET reposts = reposts + 1 WHERE id = ?1`, args: [id] });
+      await turso.execute({
+        sql:  "INSERT INTO post_reposts (user_hash, post_id) VALUES (?1, ?2)",
+        args: [userHash, id],
+      });
+      await turso.execute({
+        sql:  "UPDATE anonymous_posts SET reposts = reposts + 1 WHERE id = ?1",
+        args: [id],
+      });
       is_reposted = true;
     }
 
-    const { rows: updated } = await turso.execute({ sql: `SELECT reposts FROM anonymous_posts WHERE id = ?1`, args: [id] });
+    const { rows: updated } = await turso.execute({
+      sql:  "SELECT reposts FROM anonymous_posts WHERE id = ?1",
+      args: [id],
+    });
     res.status(200).json({ reposts: Number(updated[0]?.reposts ?? 0), is_reposted });
   } catch (err) { next(err); }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  TRENDING — GET (top 50)  ← NUEVO
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// GET /api/forum/trending — Top 50 por score compuesto
+// Score = (upvotes * 2) + (reposts * 3) + replies - (horas_desde_post * 0.5)
+// ════════════════════════════════════════════════════════════
 export const getTrending = async (req, res, next) => {
   try {
     const userHash = req.user ? hashUid(req.user.uid) : null;
-
-    // Score = upvotes * 2 + reposts * 3 + reply_count * 1 + decay por tiempo
-    // La ventana de tendencia es 7 días
-    const voteSql = userHash
-      ? ", (SELECT value FROM post_votes WHERE user_hash = ?1 AND post_id = p.id) AS user_vote"
-      : ", 0 AS user_vote";
-    const repostSql = userHash
-      ? ", EXISTS(SELECT 1 FROM post_reposts WHERE user_hash = ?1 AND post_id = p.id) AS is_reposted"
-      : ", 0 AS is_reposted";
-
-    const args = userHash ? [userHash] : [];
+    const args     = userHash ? [userHash] : [];
 
     const { rows } = await turso.execute({
       sql: `
         SELECT p.id, p.pseudonym, p.body, p.upvotes, p.reposts, p.shares, p.views,
                p.created_at, p.expires_at,
                (SELECT COUNT(*) FROM anonymous_posts r WHERE r.parent_id = p.id) AS reply_count
-               ${voteSql}
-               ${repostSql},
+               ${userHash
+                 ? `, (SELECT value FROM post_votes WHERE user_hash = ?1 AND post_id = p.id) AS user_vote,
+                    EXISTS(SELECT 1 FROM post_reposts WHERE user_hash = ?1 AND post_id = p.id) AS is_reposted`
+                 : `, 0 AS user_vote, 0 AS is_reposted`},
                (
                  p.upvotes * 2 + p.reposts * 3 +
                  (SELECT COUNT(*) FROM anonymous_posts r WHERE r.parent_id = p.id) +
@@ -372,83 +436,78 @@ export const getTrending = async (req, res, next) => {
       args,
     });
 
-    res.status(200).json({ posts: rows });
+    res.status(200).json({
+      posts: rows.map(({ user_hash, ...p }) => ({
+        ...p,
+        is_author: userHash ? user_hash === userHash : false,
+      })),
+    });
   } catch (err) { next(err); }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  DELETE — POST
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// DELETE /api/forum/posts/:id — Eliminar (autor o admin)
+// ════════════════════════════════════════════════════════════
 export const deletePost = async (req, res, next) => {
   try {
     const { id }   = req.params;
     const userHash = hashUid(req.user.uid);
 
-    const { rows } = await turso.execute({ sql: `SELECT user_hash FROM anonymous_posts WHERE id = ?1`, args: [id] });
+    const { rows } = await turso.execute({
+      sql:  "SELECT user_hash FROM anonymous_posts WHERE id = ?1",
+      args: [id],
+    });
     if (!rows.length) return next(notFound("Post no encontrado"));
     if (rows[0].user_hash !== userHash && req.user.role !== "admin")
-      return res.status(403).json({ error: true, message: "No podés eliminar este post" });
+      return next(forbidden("No podés eliminar este post"));
 
-    await turso.execute({ sql: `DELETE FROM anonymous_posts WHERE id = ?1`, args: [id] });
+    await turso.execute({
+      sql:  "DELETE FROM anonymous_posts WHERE id = ?1",
+      args: [id],
+    });
     res.status(200).json({ message: "Post eliminado" });
   } catch (err) { next(err); }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  BANNERS — CRUD  ← NUEVO
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * GET /api/forum/banners?active=1
- * Público: devuelve banners. Sin ?active filtra todos (útil para admin).
- */
+// ════════════════════════════════════════════════════════════
+// BANNERS — CRUD  /api/forum/banners
+// ════════════════════════════════════════════════════════════
 export const getBanners = async (req, res, next) => {
   try {
     const onlyActive = req.query.active === "1";
-    const whereSql   = onlyActive ? "WHERE is_active = 1" : "";
-
     const { rows } = await turso.execute(
       `SELECT id, title, description, redirect_url, svg_content, is_active, created_at, updated_at
-       FROM forum_banners ${whereSql} ORDER BY id DESC`
+       FROM forum_banners ${onlyActive ? "WHERE is_active = 1" : ""} ORDER BY id DESC`
     );
     res.status(200).json({ banners: rows });
   } catch (err) { next(err); }
 };
 
-/**
- * POST /api/forum/banners  (admin)
- */
 export const createBanner = async (req, res, next) => {
   try {
     const { title, description = "", redirect_url, svg_content = "", is_active = 1 } = req.body;
-    if (!title?.trim()) return next(badRequest("El título es requerido"));
+    if (!title?.trim())        return next(badRequest("El título es requerido"));
     if (!redirect_url?.trim()) return next(badRequest("La URL de redirección es requerida"));
 
     const { lastInsertRowid } = await turso.execute({
-      sql:  `INSERT INTO forum_banners (title, description, redirect_url, svg_content, is_active)
-             VALUES (?1, ?2, ?3, ?4, ?5)`,
+      sql:  "INSERT INTO forum_banners (title, description, redirect_url, svg_content, is_active) VALUES (?1, ?2, ?3, ?4, ?5)",
       args: [title.trim(), description.trim(), redirect_url.trim(), svg_content.trim(), is_active ? 1 : 0],
     });
-
     const { rows } = await turso.execute({
-      sql:  `SELECT * FROM forum_banners WHERE id = ?1`,
+      sql:  "SELECT * FROM forum_banners WHERE id = ?1",
       args: [Number(lastInsertRowid)],
     });
     res.status(201).json({ banner: rows[0] });
   } catch (err) { next(err); }
 };
 
-/**
- * PATCH /api/forum/banners/:id  (admin)
- */
 export const updateBanner = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const fields = ["title", "description", "redirect_url", "svg_content", "is_active"];
-    const sets   = [];
-    const args   = [];
+    const allowed = ["title", "description", "redirect_url", "svg_content", "is_active"];
+    const sets = []; const args = [];
 
-    for (const f of fields) {
+    for (const f of allowed) {
       if (req.body[f] !== undefined) {
         sets.push(`${f} = ?${args.length + 1}`);
         args.push(f === "is_active" ? (req.body[f] ? 1 : 0) : req.body[f]);
@@ -458,37 +517,37 @@ export const updateBanner = async (req, res, next) => {
 
     sets.push(`updated_at = ?${args.length + 1}`);
     args.push(now());
-    args.push(id); // WHERE id = ?N
+    args.push(id);
 
     await turso.execute({
       sql:  `UPDATE forum_banners SET ${sets.join(", ")} WHERE id = ?${args.length}`,
       args,
     });
-
-    const { rows } = await turso.execute({ sql: `SELECT * FROM forum_banners WHERE id = ?1`, args: [id] });
+    const { rows } = await turso.execute({
+      sql:  "SELECT * FROM forum_banners WHERE id = ?1",
+      args: [id],
+    });
     if (!rows.length) return next(notFound("Banner no encontrado"));
-
     res.status(200).json({ banner: rows[0] });
   } catch (err) { next(err); }
 };
 
-/**
- * DELETE /api/forum/banners/:id  (admin) — hard delete
- */
 export const deleteBanner = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { rows } = await turso.execute({ sql: `SELECT id FROM forum_banners WHERE id = ?1`, args: [id] });
+    const { rows } = await turso.execute({
+      sql:  "SELECT id FROM forum_banners WHERE id = ?1",
+      args: [id],
+    });
     if (!rows.length) return next(notFound("Banner no encontrado"));
-
-    await turso.execute({ sql: `DELETE FROM forum_banners WHERE id = ?1`, args: [id] });
+    await turso.execute({ sql: "DELETE FROM forum_banners WHERE id = ?1", args: [id] });
     res.status(200).json({ message: "Banner eliminado", id: Number(id) });
   } catch (err) { next(err); }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  PUSH NOTIFICATIONS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+// PUSH — Suscripción y VAPID Key
+// ════════════════════════════════════════════════════════════
 export const savePushSubscription = async (req, res, next) => {
   try {
     const { subscription } = req.body;
@@ -497,14 +556,13 @@ export const savePushSubscription = async (req, res, next) => {
     const ts       = now();
 
     await turso.execute({
-      sql:  `INSERT INTO push_subscriptions (user_hash, subscription, updated_at) VALUES (?1, ?2, ?3)
-             ON CONFLICT(user_hash) DO UPDATE SET subscription = excluded.subscription, updated_at = ?3`,
+      sql: `INSERT INTO push_subscriptions (user_hash, subscription, updated_at) VALUES (?1, ?2, ?3)
+            ON CONFLICT(user_hash) DO UPDATE SET subscription = excluded.subscription, updated_at = ?3`,
       args: [userHash, JSON.stringify(subscription), ts],
     });
     res.status(200).json({ ok: true });
   } catch (err) { next(err); }
 };
 
-export const getVapidPublicKey = (_req, res) => {
+export const getVapidPublicKey = (_req, res) =>
   res.status(200).json({ key: process.env.VAPID_PUBLIC_KEY || "" });
-};

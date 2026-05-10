@@ -2,7 +2,7 @@ import { Reward } from "./reward.model.js";
 import { Redemption } from "./redemption.model.js";
 import { dbFirebase } from "../../config/firebase-admin.js";
 import admin from "firebase-admin";
-import { broadcastPush } from "../notifications/notification.controller.js";
+import { broadcastPush, pushToUser } from "../notifications/notification.controller.js";
 
 export const rewardController = {
   getRewards: async (req, res, next) => {

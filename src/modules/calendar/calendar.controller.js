@@ -1,5 +1,5 @@
 import { supabase } from "../../config/supabase.js";
-import { badRequest } from "../../middlewares/errorHandler.js";
+import { badRequest, notFound } from "../../middlewares/errorHandler.js";
 import webpush from "web-push";
 import { turso } from "../../config/turso.js"; // Usamos la misma tabla de suscripciones del foro
 
