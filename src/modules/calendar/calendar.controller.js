@@ -1,30 +1,20 @@
 import { supabase } from "../../config/supabase.js";
-import { badRequest, notFound } from "../../middlewares/errorHandler.js";
+import { badRequest } from "../../middlewares/errorHandler.js";
+import webpush from "web-push";
+import { turso } from "../../config/turso.js"; // Usamos la misma tabla de suscripciones del foro
 
-export const getCalendarEvents = async (req, res, next) => {
+export const getEvents = async (req, res, next) => {
   try {
-    const { data, error } = await supabase
-      .from('academic_calendar')
-      .select('*')
-      .order('date', { ascending: true });
-
+    const { data, error } = await supabase.from('calendar_events').select('*').order('date', { ascending: true });
     if (error) throw error;
-    res.status(200).json(data);
+    res.json(data);
   } catch (err) { next(err); }
 };
 
 export const createEvent = async (req, res, next) => {
   try {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: "Acceso denegado" });
-    
-    const { title, description, date, type } = req.body;
-    if (!title || !date) return next(badRequest("Título y fecha son obligatorios"));
-
-    const { data, error } = await supabase
-      .from('academic_calendar')
-      .insert([{ title, description, date, type, created_by: req.user.uid }])
-      .select();
-
+    const { title, description, subtitle, date, type } = req.body;
+    const { data, error } = await supabase.from('calendar_events').insert([{ title, description, subtitle, date, type }]).select();
     if (error) throw error;
     res.status(201).json(data[0]);
   } catch (err) { next(err); }
@@ -32,19 +22,56 @@ export const createEvent = async (req, res, next) => {
 
 export const deleteEvent = async (req, res, next) => {
   try {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: "Acceso denegado" });
-    
     const { id } = req.params;
-    const { error } = await supabase.from('academic_calendar').delete().eq('id', id);
-
+    const { error } = await supabase.from('calendar_events').delete().eq('id', id);
     if (error) throw error;
-    res.status(200).json({ message: "Evento eliminado" });
+    res.json({ message: "Evento eliminado" });
   } catch (err) { next(err); }
 };
 
-// Tarea para auto-limpieza (Llamada desde el cron de index.js)
-export const cleanupOldEvents = async () => {
-  const now = new Date().toISOString();
-  await supabase.from('academic_calendar').delete().lt('date', now);
-  console.log("🧹 Calendario: Limpieza de eventos pasados completada.");
+// ── TAREAS PROGRAMADAS (CRON) ──────────────────────────────────────────────
+
+export const autoCleanup = async () => {
+  const today = new Date().toISOString().split('T')[0];
+  const { error } = await supabase.from('calendar_events').delete().lt('date', today);
+  if (!error) console.log("🧹 [CALENDAR] Eventos pasados eliminados.");
+};
+
+export const checkAndSendReminders = async () => {
+  try {
+    // 1. Buscar eventos que ocurran MAÑANA
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    const { data: events, error } = await supabase
+      .from('calendar_events')
+      .select('*')
+      .eq('date', tomorrowStr);
+
+    if (error || !events || events.length === 0) return;
+
+    // 2. Obtener todas las suscripciones Push (usando la tabla que ya tienes en Turso)
+    const { rows: subs } = await turso.execute("SELECT subscription FROM push_subscriptions");
+    if (subs.length === 0) return;
+
+    // 3. Enviar notificación por cada evento
+    for (const event of events) {
+      const payload = JSON.stringify({
+        title: `📅 iTEC Recordatorio: ${event.type.toUpperCase()}`,
+        body: `Mañana es: ${event.title}. ${event.subtitle || ''}`,
+        url: "/calendario"
+      });
+
+      subs.forEach(async (row) => {
+        try {
+          const sub = JSON.parse(row.subscription);
+          await webpush.sendNotification(sub, payload);
+        } catch (e) { /* Ignorar suscripciones expiradas */ }
+      });
+    }
+    console.log(`🔔 [CALENDAR] Recordatorios enviados para ${events.length} evento(s).`);
+  } catch (error) {
+    console.error("Error en cron de recordatorios:", error);
+  }
 };
