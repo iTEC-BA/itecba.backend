@@ -30,6 +30,8 @@ import faqRoutes from "./modules/faq/faq.routes.js";
 import forumRoutes from "./modules/forum/forum.routes.js";
 import calendarRoutes from "./modules/calendar/calendar.routes.js";
 import notificationRoutes from "./modules/notifications/notification.routes.js";
+import trueketecRoutes       from "./modules/trueketec/trueketec.routes.js";
+import { cleanExpiredPosts } from "./modules/trueketec/trueketec.controller.js";
 import { initWebPush } from "./modules/notifications/notification.controller.js";
 
 const app = express();
@@ -122,6 +124,7 @@ app.use("/api/faq", faqRoutes);
 app.use("/api/forum", forumRoutes);
 app.use("/api/calendar", calendarRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/trueketec",       trueketecRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>
@@ -165,6 +168,9 @@ process.on("uncaughtException", (err) => {
 });
 
 const PORT = process.env.PORT || 5001;
+// TruekeTEC — Limpiar solicitudes expiradas cada 12h
+setInterval(cleanExpiredPosts, 12 * 60 * 60 * 1000);
+
 app.listen(PORT, () =>
   console.log(
     `🚀 Servidor escuchando en puerto ${PORT} [${process.env.NODE_ENV || "development"}]`,
