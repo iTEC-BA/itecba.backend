@@ -7,7 +7,9 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 // ── Validación temprana (igual que firebase-admin.js) ────────
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error("🔴 Variables de entorno faltantes: SUPABASE_URL y/o SUPABASE_SERVICE_KEY");
+  console.error(
+    "🔴 Variables de entorno faltantes: SUPABASE_URL y/o SUPABASE_SERVICE_KEY",
+  );
   process.exit(1);
 }
 
@@ -30,10 +32,11 @@ export async function checkSupabaseConnection() {
     // Código 42P01 = tabla no existe (PostgreSQL)
     if (error.code === "42P01") {
       console.error("🔴 [SUPABASE] La tabla 'calendar_events' no existe.");
-      console.error("   Ejecutá el SQL del archivo supabase_schema.sql en el dashboard de Supabase.");
     } else {
       console.error("🔴 [SUPABASE] Error de conexión:", error.message);
-      console.error("   Verificá que el proyecto Supabase no esté pausado (free tier se pausa a los 7 días).");
+      console.error(
+        "   Verificá que el proyecto Supabase no esté pausado (free tier se pausa a los 7 días).",
+      );
     }
     // En producción preferimos arrancar igual pero loguear el error;
     // si querés que falle hard, descomentá la siguiente línea:
