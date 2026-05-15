@@ -31,9 +31,12 @@ const findPerfectMatches = (post) => {
     userId:          { $ne: post.userId },
     estado:          "Activo",
     materia:         post.materia,
+    // Si yo busco "Cualquiera", cualquier comisión actual del otro me sirve.
+    // Si busco una específica, el otro debe tener exactamente esa comisión.
     comision_actual: post.comision_deseada === "Cualquiera"
       ? { $exists: true }
-      : { $in: [post.comision_deseada, post.comision_deseada] },
+      : post.comision_deseada,
+    // El otro debe querer mi comisión actual o aceptar "Cualquiera".
     comision_deseada: { $in: [post.comision_actual, "Cualquiera"] },
   };
   return Trueketec.find(filter).select("_id userId userEmail userName materia comision_actual comision_deseada turno_actual turno_deseado").lean();
