@@ -31,6 +31,7 @@ import forumRoutes from "./modules/forum/forum.routes.js";
 import calendarRoutes from "./modules/calendar/calendar.routes.js";
 import notificationRoutes from "./modules/notifications/notification.routes.js";
 import trueketecRoutes       from "./modules/trueketec/trueketec.routes.js";
+import aulasRoutes from "./modules/aulas/aula.routes.js";
 import { cleanExpiredPosts } from "./modules/trueketec/trueketec.controller.js";
 import { initWebPush } from "./modules/notifications/notification.controller.js";
 
@@ -125,6 +126,7 @@ app.use("/api/forum", forumRoutes);
 app.use("/api/calendar", calendarRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/trueketec",       trueketecRoutes);
+app.use("/api/aulas",          aulasRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>
