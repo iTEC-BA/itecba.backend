@@ -1,68 +1,61 @@
-import faqService from "./faq.service.js"; // ← antes: import { aqService } from "./faq.service"
+// src/modules/faq/faq.controller.js
+import faqService from "./faq.service.js";
+import { notFound } from "../../middlewares/errorHandler.js";
 
 const faqController = {
-  getAll: async (req, res) => {
+  getAll: async (req, res, next) => {
     try {
       const faqs = await faqService.getAll();
       res.json(faqs);
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
+    } catch (e) { next(e); }
   },
 
-  search: async (req, res) => {
+  search: async (req, res, next) => {
     try {
       const results = await faqService.search(req.query.q);
       res.json(results);
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
+    } catch (e) { next(e); }
   },
 
-  getTop: async (req, res) => {
+  getTop: async (req, res, next) => {
     try {
       res.json(await faqService.getTop());
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
+    } catch (e) { next(e); }
   },
 
-  create: async (req, res) => {
+  create: async (req, res, next) => {
     try {
       const faq = await faqService.create(req.body, req.user?.uid);
       res.status(201).json(faq);
-    } catch (e) {
-      res.status(400).json({ error: e.message });
-    }
+    } catch (e) { next(e); }
   },
 
-  update: async (req, res) => {
+  update: async (req, res, next) => {
     try {
       const faq = await faqService.update(req.params.id, req.body);
-      if (!faq) return res.status(404).json({ error: "FAQ no encontrada" });
+      if (!faq) return next(notFound("FAQ no encontrada"));
       res.json(faq);
-    } catch (e) {
-      res.status(400).json({ error: e.message });
-    }
+    } catch (e) { next(e); }
   },
 
-  delete: async (req, res) => {
+  delete: async (req, res, next) => {
     try {
-      await faqService.delete(req.params.id);
+      const doc = await faqService.delete(req.params.id);
+      if (!doc) return next(notFound("FAQ no encontrada"));
       res.json({ message: "FAQ eliminada" });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
+    } catch (e) { next(e); }
   },
 
-  trackUse: async (req, res) => {
+  trackUse: async (req, res, next) => {
     try {
       await faqService.incrementPopularity(req.params.id);
       res.json({ ok: true });
-    } catch {
+    } catch (e) {
+      // Silencioso — no romper la experiencia del usuario por un fallo de tracking
+      console.warn("[FAQ] trackUse error:", e.message);
       res.json({ ok: false });
     }
   },
 };
 
-export default faqController; // ← antes: module.exports = faqController
+export default faqController;

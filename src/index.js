@@ -121,6 +121,7 @@ app.use("/api/rewards", rewardRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/materias", materiasRoutes);
 app.use("/api/benefits", benefitRoutes);
+app.use("/api/faqs",        faqRoutes); // alias plural (frontend usa /faqs)
 app.use("/api/faq", faqRoutes);
 app.use("/api/forum", forumRoutes);
 app.use("/api/calendar", calendarRoutes);

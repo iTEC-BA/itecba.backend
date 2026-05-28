@@ -34,18 +34,23 @@ const aiController = {
 
       const db      = admin.firestore();
       const userRef = db.collection("users").doc(uid);
-      const snap    = await userRef.get();
-      if (!snap.exists)
-        return res.status(404).json({ error: "Usuario no encontrado" });
 
-      const current = snap.data().points ?? 0;
-      if (current < points)
-        return res.status(400).json({ error: "Puntos insuficientes", current });
-
-      await userRef.update({
-        points: admin.firestore.FieldValue.increment(-points),
-      });
-      res.json({ ok: true, newBalance: current - points });
+      // ── Transacción atómica para evitar race condition ─────────────────────
+      let newBalance;
+      try {
+        newBalance = await db.runTransaction(async (tx) => {
+          const snap = await tx.get(userRef);
+          if (!snap.exists) throw Object.assign(new Error("Usuario no encontrado"), { code: 404 });
+          const current = snap.data().points ?? 0;
+          if (current < points) throw Object.assign(new Error("Puntos insuficientes"), { code: 400, current });
+          tx.update(userRef, { points: admin.firestore.FieldValue.increment(-points) });
+          return current - points;
+        });
+      } catch (txErr) {
+        const status = txErr.code === 404 ? 404 : txErr.code === 400 ? 400 : 500;
+        return res.status(status).json({ error: txErr.message, current: txErr.current });
+      }
+      res.json({ ok: true, newBalance });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
