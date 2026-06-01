@@ -1,6 +1,8 @@
 // src/modules/courses/course.routes.js
+// IMPORTANTE: Las rutas estáticas (/admin/*, /fetch-playlist) van ANTES de /:id
+// para evitar que Express las interprete como courseId.
 import { Router }                    from "express";
-import { body, param }               from "express-validator";
+import { body, query }               from "express-validator";
 import { validate }                  from "../../middlewares/validate.js";
 import { verifyToken, requireAdmin } from "../../middlewares/authMiddleware.js";
 import {
@@ -21,17 +23,44 @@ import {
 
 const router = Router();
 
-// ── Públicas ─────────────────────────────────────────────────────────────────
-router.get("/",     getCourses);       // Cursos aprobados (catálogo estudiantes)
-router.get("/:id",  getCourseById);    // Detalle de curso
+// ── Públicas ──────────────────────────────────────────────────────────────────
+// GET /api/courses?search=analisis&materia=X&categoria=Oficial&page=1&limit=9
+router.get(
+  "/",
+  [
+    query("search").optional().trim().isLength({ max: 100 }),
+    query("materia").optional().trim(),
+    query("categoria").optional().isIn(["Oficial", "Comunidad", ""]),
+    query("page").optional().isInt({ min: 1 }),
+    query("limit").optional().isInt({ min: 1, max: 50 }),
+  ],
+  validate,
+  getCourses
+);
 
-// ── Admin: gestión general ────────────────────────────────────────────────────
+// ── Admin: rutas estáticas (DEBEN ir ANTES de /:id) ──────────────────────────
+// FIX: sin este orden, "admin/broken-videos" sería capturado por /:id
 router.get(
   "/admin/all",
   verifyToken, requireAdmin,
   getAllCourses
 );
 
+router.get(
+  "/admin/broken-videos",
+  verifyToken, requireAdmin,
+  getBrokenVideos
+);
+
+router.post(
+  "/fetch-playlist",
+  verifyToken, requireAdmin,
+  [body("playlistUrl").trim().notEmpty().withMessage("playlistUrl requerida")],
+  validate,
+  fetchPlaylist
+);
+
+// ── Admin: CRUD general ───────────────────────────────────────────────────────
 router.post(
   "/",
   verifyToken, requireAdmin,
@@ -44,6 +73,9 @@ router.post(
   validate,
   createCourse
 );
+
+// ── Rutas con :id (SIEMPRE al final para no colisionar) ──────────────────────
+router.get("/:id", getCourseById);
 
 router.put(
   "/:id",
@@ -65,22 +97,7 @@ router.delete(
   deleteCourse
 );
 
-// ── Admin: playlist de YouTube ─────────────────────────────────────────────────
-router.post(
-  "/fetch-playlist",
-  verifyToken, requireAdmin,
-  [body("playlistUrl").trim().notEmpty().withMessage("playlistUrl requerida")],
-  validate,
-  fetchPlaylist
-);
-
-// ── Admin: gestión de videos rotos ────────────────────────────────────────────
-router.get(
-  "/admin/broken-videos",
-  verifyToken, requireAdmin,
-  getBrokenVideos
-);
-
+// ── Admin: gestión de videos en curso ─────────────────────────────────────────
 router.patch(
   "/:id/videos/:videoId",
   verifyToken, requireAdmin,
@@ -99,7 +116,7 @@ router.delete(
   clearVideoReports
 );
 
-// ── Autenticado: reportar video roto ──────────────────────────────────────────
+// ── Autenticado: reportar video ───────────────────────────────────────────────
 router.post(
   "/:id/videos/:videoId/report",
   verifyToken,

@@ -1,44 +1,99 @@
 // src/modules/courses/course.controller.js
-import ytpl         from "ytpl";
-import Course       from "./course.model.js";
+import ytpl                     from "ytpl";
+import Course                   from "./course.model.js";
 import { notFound, badRequest } from "../../middlewares/errorHandler.js";
+import { normalizeStr }         from "../../utils/normalize.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Formatea segundos → "MM:SS" */
-const fmtDuration = (secs) => {
-  if (!secs) return "0:00";
-  const m = Math.floor(secs / 60);
-  const s = Math.floor(secs % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
+/** Construye el filtro de búsqueda normalizado para MongoDB */
+const buildSearchFilter = (query = {}) => {
+  const filter = {};
+
+  // Estado
+  // Incluir cursos aprobados O los que no tienen status (documentos legacy)
+  filter.$or = [
+    { status: "approved" },
+    { status: { $exists: false } },
+    { status: null },
+    { status: "" },
+  ];
+
+  // Búsqueda normalizada (sin tildes, sin chars especiales)
+  if (query.search?.trim()) {
+    const needle = normalizeStr(query.search);
+    // Búsqueda por prefijo/substring en el campo _searchable (pre-normalizado)
+    filter._searchable = { $regex: needle, $options: "i" };
+  }
+
+  // Filtro exacto de materia (se normaliza para comparar)
+  if (query.materia?.trim()) {
+    filter.materia = { $regex: `^${query.materia.trim()}$`, $options: "i" };
+  }
+
+  // Filtro de categoría
+  if (query.categoria === "Oficial" || query.categoria === "Comunidad") {
+    filter.categoria = query.categoria;
+  }
+
+  return filter;
 };
 
-// ── GET /api/courses  — público: solo cursos aprobados ────────────────────────
+/** Parsea parámetros de paginación con valores seguros */
+const parsePagination = (query) => {
+  const page  = Math.max(1, parseInt(query.page,  10) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(query.limit, 10) || 50));
+  const skip  = (page - 1) * limit;
+  return { page, limit, skip };
+};
+
+// ── GET /api/courses  — público: cursos aprobados con búsqueda y paginación ──
 export const getCourses = async (req, res, next) => {
   try {
-    const filter = { status: "approved" };
-    if (req.query.materia)   filter.materia   = req.query.materia;
-    if (req.query.categoria) filter.categoria = req.query.categoria;
+    const filter              = buildSearchFilter(req.query);
+    const { page, limit, skip } = parsePagination(req.query);
 
-    const courses = await Course.find(filter)
-      .select("-videos.brokenReports") // No exponemos reportes a estudiantes
-      .sort({ createdAt: -1 })
-      .lean();
+    const [courses, total] = await Promise.all([
+      Course.find(filter)
+        .select("-videos.brokenReports")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Course.countDocuments(filter),
+    ]);
 
-    res.status(200).json(courses);
+    res.status(200).json({
+      courses,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
   } catch (err) {
     next(err);
   }
 };
 
-// ── GET /api/courses/all  — admin: incluye draft y archived ──────────────────
+// ── GET /api/courses/all  — admin: todos los estados ─────────────────────────
 export const getAllCourses = async (req, res, next) => {
   try {
-    const courses = await Course.find()
-      .select("-videos.brokenReports")
-      .sort({ createdAt: -1 })
-      .lean();
-    res.status(200).json(courses);
+    const { page, limit, skip } = parsePagination(req.query);
+    const search = req.query.search?.trim();
+    const filter = {};
+    if (search) filter._searchable = { $regex: normalizeStr(search), $options: "i" };
+
+    const [courses, total] = await Promise.all([
+      Course.find(filter)
+        .select("-videos.brokenReports")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Course.countDocuments(filter),
+    ]);
+
+    res.status(200).json({
+      courses,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
   } catch (err) {
     next(err);
   }
@@ -60,21 +115,23 @@ export const getCourseById = async (req, res, next) => {
 // ── POST /api/courses  — admin ────────────────────────────────────────────────
 export const createCourse = async (req, res, next) => {
   try {
-    const { title, description, imageUrl, playlistId, videos, materia, categoria, status } = req.body;
+    const { title, description, imageUrl, playlistId, videos, materia, categoria, status } =
+      req.body;
+
     if (!title?.trim() || !videos?.length) {
       return next(badRequest("title y videos son requeridos"));
     }
 
     const course = await Course.create({
-      title: title.trim(),
+      title:       title.trim(),
       description: description?.trim() ?? "",
-      imageUrl: imageUrl?.trim() ?? "",
-      playlistId: playlistId?.trim() ?? "",
-      materia: materia?.trim() ?? "",
-      categoria: categoria ?? "Comunidad",
-      status: status ?? "approved",
+      imageUrl:    imageUrl?.trim() ?? "",
+      playlistId:  playlistId?.trim() ?? "",
+      materia:     materia?.trim() ?? "",
+      categoria:   categoria ?? "Comunidad",
+      status:      status ?? "approved",
       videos,
-      createdBy: req.user?.uid ?? "",
+      createdBy:   req.user?.uid ?? "",
     });
 
     res.status(201).json(course);
@@ -91,9 +148,25 @@ export const updateCourse = async (req, res, next) => {
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     }
-    if (Object.keys(update).length === 0) return next(badRequest("Sin datos para actualizar"));
 
-    const course = await Course.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
+    if (Object.keys(update).length === 0) {
+      return next(badRequest("Sin datos para actualizar"));
+    }
+
+    // Regenerar _searchable si cambia algún campo relevante
+    if (update.title || update.description || update.materia) {
+      const existing = await Course.findById(req.params.id).lean();
+      if (existing) {
+        update._searchable = normalizeStr(
+          `${update.title ?? existing.title} ${update.description ?? existing.description} ${update.materia ?? existing.materia}`
+        );
+      }
+    }
+
+    const course = await Course.findByIdAndUpdate(req.params.id, update, {
+      new: true,
+      runValidators: true,
+    });
     if (!course) return next(notFound("Curso no encontrado"));
     res.status(200).json(course);
   } catch (err) {
@@ -101,7 +174,7 @@ export const updateCourse = async (req, res, next) => {
   }
 };
 
-// ── PATCH /api/courses/:id/status  — admin: publicar/archivar ───────────────
+// ── PATCH /api/courses/:id/status  — admin ───────────────────────────────────
 export const updateCourseStatus = async (req, res, next) => {
   try {
     const { status } = req.body;
@@ -128,13 +201,11 @@ export const deleteCourse = async (req, res, next) => {
 };
 
 // ── POST /api/courses/fetch-playlist  — admin: importar desde YouTube ────────
-// Reemplaza youtube-dl-exec con ytpl (pure JS, sin binario externo)
 export const fetchPlaylist = async (req, res, next) => {
   try {
     const { playlistUrl } = req.body;
     if (!playlistUrl?.trim()) return next(badRequest("playlistUrl requerida"));
 
-    // ytpl acepta URLs de playlist de YouTube directamente
     const playlist = await ytpl(playlistUrl.trim(), { limit: Infinity });
 
     const videos = playlist.items.map((item) => ({
@@ -145,7 +216,6 @@ export const fetchPlaylist = async (req, res, next) => {
 
     res.status(200).json({ title: playlist.title, videos });
   } catch (err) {
-    // Errores comunes: playlist privada, URL inválida
     if (err.message?.includes("private") || err.message?.includes("unavailable")) {
       return next(badRequest("Playlist privada o no disponible"));
     }
@@ -153,54 +223,9 @@ export const fetchPlaylist = async (req, res, next) => {
   }
 };
 
-// ── POST /api/courses/:id/videos/:videoId/report  — autenticado ──────────────
-// Los estudiantes reportan videos que no funcionan
-export const reportBrokenVideo = async (req, res, next) => {
-  try {
-    const { id: courseId, videoId } = req.params;
-    const { reason = "no-reproduce" } = req.body;
-    const uid = req.user.uid;
-
-    const VALID_REASONS = ["no-reproduce", "error-404", "privado", "contenido-incorrecto"];
-    if (!VALID_REASONS.includes(reason)) {
-      return next(badRequest(`reason inválido. Usar: ${VALID_REASONS.join(", ")}`));
-    }
-
-    const course = await Course.findById(courseId);
-    if (!course) return next(notFound("Curso no encontrado"));
-
-    const video = course.videos.id(videoId);
-    if (!video) return next(notFound("Video no encontrado en este curso"));
-
-    // Evitar reportes duplicados del mismo usuario
-    const alreadyReported = video.brokenReports.some((r) => r.reportedBy === uid);
-    if (alreadyReported) {
-      return res.status(409).json({ message: "Ya reportaste este video." });
-    }
-
-    video.brokenReports.push({ reportedBy: uid, reason });
-
-    // Auto-marcar como roto si supera 3 reportes
-    if (video.brokenReports.length >= 3) {
-      video.isBroken = true;
-    }
-
-    await course.save();
-
-    res.status(200).json({
-      message: "Reporte enviado. Gracias por colaborar.",
-      reportCount: video.brokenReports.length,
-      isBroken:    video.isBroken,
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// ── GET /api/courses/broken-videos  — admin: ver todos los videos rotos ───────
+// ── GET /api/courses/admin/broken-videos  — admin ────────────────────────────
 export const getBrokenVideos = async (req, res, next) => {
   try {
-    // Cursos que tienen al menos un video marcado como roto o con reportes
     const courses = await Course.find({
       $or: [
         { "videos.isBroken": true },
@@ -210,7 +235,6 @@ export const getBrokenVideos = async (req, res, next) => {
       .select("title materia videos")
       .lean();
 
-    // Aplanar para devolver una lista de {courseId, courseTitle, video, reportCount}
     const broken = [];
     for (const course of courses) {
       for (const video of course.videos) {
@@ -233,7 +257,6 @@ export const getBrokenVideos = async (req, res, next) => {
       }
     }
 
-    // Ordenar: más reportes primero
     broken.sort((a, b) => b.video.reportCount - a.video.reportCount);
 
     res.status(200).json({ total: broken.length, broken });
@@ -242,8 +265,46 @@ export const getBrokenVideos = async (req, res, next) => {
   }
 };
 
+// ── POST /api/courses/:id/videos/:videoId/report  — autenticado ──────────────
+export const reportBrokenVideo = async (req, res, next) => {
+  try {
+    const { id: courseId, videoId } = req.params;
+    const { reason = "no-reproduce" } = req.body;
+    const uid = req.user.uid;
+
+    const VALID = ["no-reproduce", "error-404", "privado", "contenido-incorrecto"];
+    if (!VALID.includes(reason)) {
+      return next(badRequest(`reason inválido. Valores permitidos: ${VALID.join(", ")}`));
+    }
+
+    const course = await Course.findById(courseId);
+    if (!course) return next(notFound("Curso no encontrado"));
+
+    const video = course.videos.id(videoId);
+    if (!video) return next(notFound("Video no encontrado en este curso"));
+
+    const alreadyReported = video.brokenReports.some((r) => r.reportedBy === uid);
+    if (alreadyReported) {
+      return res.status(409).json({ message: "Ya reportaste este video." });
+    }
+
+    video.brokenReports.push({ reportedBy: uid, reason });
+
+    if (video.brokenReports.length >= 3) video.isBroken = true;
+
+    await course.save();
+
+    res.status(200).json({
+      message:     "Reporte enviado. Gracias por colaborar.",
+      reportCount: video.brokenReports.length,
+      isBroken:    video.isBroken,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // ── PATCH /api/courses/:id/videos/:videoId  — admin: corregir video ───────────
-// Permite cambiar el youtubeId o el título del video reportado
 export const fixBrokenVideo = async (req, res, next) => {
   try {
     const { id: courseId, videoId } = req.params;
@@ -255,11 +316,9 @@ export const fixBrokenVideo = async (req, res, next) => {
     const video = course.videos.id(videoId);
     if (!video) return next(notFound("Video no encontrado"));
 
-    if (youtubeId !== undefined) video.youtubeId = youtubeId.trim();
-    if (title     !== undefined) video.title     = title.trim();
-    if (duration  !== undefined) video.duration  = duration.trim();
-
-    // Al corregir, se limpian los reportes y el flag
+    if (youtubeId !== undefined) video.youtubeId    = youtubeId.trim();
+    if (title     !== undefined) video.title        = title.trim();
+    if (duration  !== undefined) video.duration     = duration.trim();
     video.brokenReports = [];
     video.isBroken      = false;
 
@@ -270,7 +329,7 @@ export const fixBrokenVideo = async (req, res, next) => {
   }
 };
 
-// ── DELETE /api/courses/:id/videos/:videoId  — admin: eliminar video roto ─────
+// ── DELETE /api/courses/:id/videos/:videoId  — admin ─────────────────────────
 export const deleteVideo = async (req, res, next) => {
   try {
     const { id: courseId, videoId } = req.params;
@@ -278,10 +337,10 @@ export const deleteVideo = async (req, res, next) => {
     const course = await Course.findById(courseId);
     if (!course) return next(notFound("Curso no encontrado"));
 
-    const videoIndex = course.videos.findIndex((v) => v._id.toString() === videoId);
-    if (videoIndex === -1) return next(notFound("Video no encontrado"));
+    const idx = course.videos.findIndex((v) => v._id.toString() === videoId);
+    if (idx === -1) return next(notFound("Video no encontrado"));
 
-    course.videos.splice(videoIndex, 1);
+    course.videos.splice(idx, 1);
     await course.save();
 
     res.status(200).json({ message: "Video eliminado del curso" });
@@ -290,7 +349,7 @@ export const deleteVideo = async (req, res, next) => {
   }
 };
 
-// ── DELETE /api/courses/:id/videos/:videoId/reports  — admin: limpiar reportes
+// ── DELETE /api/courses/:id/videos/:videoId/reports  — admin ─────────────────
 export const clearVideoReports = async (req, res, next) => {
   try {
     const { id: courseId, videoId } = req.params;

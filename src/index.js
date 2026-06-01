@@ -30,10 +30,11 @@ import faqRoutes from "./modules/faq/faq.routes.js";
 import forumRoutes from "./modules/forum/forum.routes.js";
 import calendarRoutes from "./modules/calendar/calendar.routes.js";
 import notificationRoutes from "./modules/notifications/notification.routes.js";
-import trueketecRoutes       from "./modules/trueketec/trueketec.routes.js";
+import trueketecRoutes from "./modules/trueketec/trueketec.routes.js";
 import aulasRoutes from "./modules/aulas/aula.routes.js";
 import { cleanExpiredPosts } from "./modules/trueketec/trueketec.controller.js";
 import { initWebPush } from "./modules/notifications/notification.controller.js";
+import { migrateCourseStatus } from "./scripts/migrate-courses-status-fn.js";
 
 const app = express();
 
@@ -85,7 +86,7 @@ app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 // ── 5. Rate Limiting ──────────────────────────────────────────────────────────
 const baseLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: 200,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -121,13 +122,13 @@ app.use("/api/rewards", rewardRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/materias", materiasRoutes);
 app.use("/api/benefits", benefitRoutes);
-app.use("/api/faqs",        faqRoutes); // alias plural (frontend usa /faqs)
+app.use("/api/faqs", faqRoutes); // alias plural (frontend usa /faqs)
 app.use("/api/faq", faqRoutes);
 app.use("/api/forum", forumRoutes);
 app.use("/api/calendar", calendarRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/trueketec",       trueketecRoutes);
-app.use("/api/aulas",          aulasRoutes);
+app.use("/api/trueketec", trueketecRoutes);
+app.use("/api/aulas", aulasRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>
