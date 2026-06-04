@@ -12,6 +12,8 @@ find . -type f \
     -not -path "*/node_modules/*" \
     -not -path "*/.git/*" \
     -not -name ".env*" \
+    -not -name ".cache" \
+    -not -name "eng.traineddata" \
     -not -name "*.log" \
     -not -name "package-lock.json" \
     -not -name "pnpm-lock.yaml" \
