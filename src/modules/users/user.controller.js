@@ -1,36 +1,65 @@
 import { dbFirebase, authFirebase } from "../../config/firebase-admin.js";
-import { notFound, badRequest }     from "../../middlewares/errorHandler.js";
+import { notFound, badRequest } from "../../middlewares/errorHandler.js";
+const COUNT_CACHE_TTL_MS = 5 * 60 * 1000;
+let usersCountCache = { total: null, timestamp: 0 };
 
 // GET /api/users  — lista paginada de usuarios (solo admin)
 export const getUsers = async (req, res, next) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 20, 100);
     // nextPageToken permite paginación en Firebase Auth
-    const pageToken  = req.query.pageToken || undefined;
+    const pageToken = req.query.pageToken || undefined;
     const listResult = await authFirebase.listUsers(limit, pageToken);
 
     // Enriquecemos con el rol desde Firestore (en paralelo, limitado a 10 por batch)
     const enriched = await Promise.all(
       listResult.users.map(async (user) => {
-        const doc  = await dbFirebase.collection("users").doc(user.uid).get();
+        const doc = await dbFirebase.collection("users").doc(user.uid).get();
         const data = doc.exists ? doc.data() : {};
         return {
-          uid:         user.uid,
-          email:       user.email,
+          uid: user.uid,
+          email: user.email,
           displayName: user.displayName,
-          photoURL:    user.photoURL,
-          disabled:    user.disabled,
-          createdAt:   user.metadata.creationTime,
-          role:        data.role ?? "student",
-          points:      data.points ?? 0,
+          photoURL: user.photoURL,
+          disabled: user.disabled,
+          createdAt: user.metadata.creationTime,
+          role: data.role ?? "student",
+          points: data.points ?? 0,
         };
-      })
+      }),
     );
 
     res.status(200).json({
-      users:         enriched,
+      users: enriched,
       nextPageToken: listResult.pageToken ?? null,
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getUsersCount = async (req, res, next) => {
+  try {
+    const now = Date.now();
+    if (
+      usersCountCache.total !== null &&
+      now - usersCountCache.timestamp < COUNT_CACHE_TTL_MS
+    ) {
+      return res
+        .status(200)
+        .json({ total: usersCountCache.total, cached: true });
+    }
+
+    let total = 0;
+    let pageToken;
+    do {
+      const result = await authFirebase.listUsers(1000, pageToken);
+      total += result.users.length;
+      pageToken = result.pageToken;
+    } while (pageToken);
+
+    usersCountCache = { total, timestamp: now };
+    res.status(200).json({ total, cached: false });
   } catch (err) {
     next(err);
   }
@@ -42,19 +71,21 @@ export const searchUserByEmail = async (req, res, next) => {
     const { email } = req.query;
     if (!email) return next(badRequest("Parámetro email requerido"));
 
-    const userRecord = await authFirebase.getUserByEmail(email).catch(() => null);
+    const userRecord = await authFirebase
+      .getUserByEmail(email)
+      .catch(() => null);
     if (!userRecord) return next(notFound("Usuario no encontrado"));
 
-    const doc  = await dbFirebase.collection("users").doc(userRecord.uid).get();
+    const doc = await dbFirebase.collection("users").doc(userRecord.uid).get();
     const data = doc.exists ? doc.data() : {};
 
     res.status(200).json({
-      uid:         userRecord.uid,
-      email:       userRecord.email,
+      uid: userRecord.uid,
+      email: userRecord.email,
       displayName: userRecord.displayName,
-      photoURL:    userRecord.photoURL,
-      role:        data.role ?? "student",
-      points:      data.points ?? 0,
+      photoURL: userRecord.photoURL,
+      role: data.role ?? "student",
+      points: data.points ?? 0,
     });
   } catch (err) {
     next(err);
@@ -64,19 +95,24 @@ export const searchUserByEmail = async (req, res, next) => {
 // PATCH /api/users/:uid/role  — cambiar rol (admin)
 export const updateUserRole = async (req, res, next) => {
   try {
-    const { uid }  = req.params;
+    const { uid } = req.params;
     const { role } = req.body;
     const VALID_ROLES = ["student", "admin", "moderator"];
 
     if (!VALID_ROLES.includes(role)) {
-      return next(badRequest(`Rol inválido. Debe ser: ${VALID_ROLES.join(", ")}`));
+      return next(
+        badRequest(`Rol inválido. Debe ser: ${VALID_ROLES.join(", ")}`),
+      );
     }
     // Evitar que el admin se auto-demote accidentalmente
     if (uid === req.user.uid && role !== "admin") {
       return next(badRequest("No podés cambiar tu propio rol"));
     }
 
-    await dbFirebase.collection("users").doc(uid).set({ role }, { merge: true });
+    await dbFirebase
+      .collection("users")
+      .doc(uid)
+      .set({ role }, { merge: true });
     res.status(200).json({ uid, role, message: "Rol actualizado" });
   } catch (err) {
     next(err);
@@ -86,14 +122,15 @@ export const updateUserRole = async (req, res, next) => {
 // PATCH /api/users/:uid/points  — sumar/restar puntos (admin)
 export const updateUserPoints = async (req, res, next) => {
   try {
-    const { uid }    = req.params;
+    const { uid } = req.params;
     const { points } = req.body;
 
-    const ref      = dbFirebase.collection("users").doc(uid);
-    const doc      = await ref.get();
-    if (!doc.exists) return next(notFound("Usuario no encontrado en Firestore"));
+    const ref = dbFirebase.collection("users").doc(uid);
+    const doc = await ref.get();
+    if (!doc.exists)
+      return next(notFound("Usuario no encontrado en Firestore"));
 
-    const current  = doc.data().points ?? 0;
+    const current = doc.data().points ?? 0;
     const newTotal = Math.max(0, current + Number(points));
     await ref.set({ points: newTotal }, { merge: true });
 
@@ -114,8 +151,14 @@ export const updateUserProfile = async (req, res, next) => {
     }
 
     const ALLOWED = [
-      "displayName", "dni", "legajo", "specialty",
-      "careers", "startYear", "photoURL", "phone",
+      "displayName",
+      "dni",
+      "legajo",
+      "specialty",
+      "careers",
+      "startYear",
+      "photoURL",
+      "phone",
     ];
     const update = {};
     for (const key of ALLOWED) {

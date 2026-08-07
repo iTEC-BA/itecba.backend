@@ -1,9 +1,10 @@
-import { Router }                    from "express";
-import { body, query }               from "express-validator";
-import { validate }                  from "../../middlewares/validate.js";
+import { Router } from "express";
+import { body, query } from "express-validator";
+import { validate } from "../../middlewares/validate.js";
 import { verifyToken, requireAdmin } from "../../middlewares/authMiddleware.js";
 import {
   getUsers,
+  getUsersCount,
   searchUserByEmail,
   updateUserRole,
   updateUserPoints,
@@ -31,38 +32,40 @@ router.patch(
     body("photoURL").optional().trim().isURL(),
   ],
   validate,
-  updateUserProfile
+  updateUserProfile,
 );
 
 // ── Todas las rutas siguientes son exclusivas de admin ────────────────────────
 router.use(verifyToken, requireAdmin);
 
+router.get("/count", getUsersCount);
+
 router.get(
   "/",
   [query("limit").optional().isInt({ min: 1, max: 100 }).toInt()],
   validate,
-  getUsers
+  getUsers,
 );
 
 router.get(
   "/search",
   [query("email").isEmail().withMessage("Email inválido")],
   validate,
-  searchUserByEmail
+  searchUserByEmail,
 );
 
 router.patch(
   "/:uid/role",
   [body("role").trim().notEmpty().withMessage("Rol requerido")],
   validate,
-  updateUserRole
+  updateUserRole,
 );
 
 router.patch(
   "/:uid/points",
   [body("points").isNumeric().withMessage("Puntos debe ser un número")],
   validate,
-  updateUserPoints
+  updateUserPoints,
 );
 
 export default router;
