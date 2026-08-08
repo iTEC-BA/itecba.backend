@@ -4,12 +4,12 @@ const redemptionSchema = new mongoose.Schema(
   {
     userId: { type: String, required: true },
     userEmail: { type: String, required: true },
-    rewardId: {
+    benefitId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Reward",
+      ref: "Benefit",
       required: true,
     },
-    rewardTitle: { type: String, required: true },
+    benefitTitle: { type: String, required: true },
     pointsCost: { type: Number, required: true },
     payload: { type: Object, default: {} },
     status: {

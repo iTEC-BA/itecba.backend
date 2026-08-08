@@ -1,34 +1,31 @@
 import { Router } from "express";
-import { body, query } from "express-validator";
+import { body } from "express-validator";
 import { validate } from "../../middlewares/validate.js";
 import { verifyToken, requireAdmin } from "../../middlewares/authMiddleware.js";
 import {
-  getBenefits,
-  getAllBenefits,
-  createBenefit,
-  updateBenefit,
-  deleteBenefit,
+  getBenefits, getAllBenefits, createBenefit, updateBenefit,
+  deleteBenefit, redeemBenefit, getAllRedemptions
 } from "./benefit.controller.js";
 
 const router = Router();
 
-// Público
 router.get("/", getBenefits);
+router.post("/redeem", verifyToken, redeemBenefit);
 
-// Admin
 router.get("/all", verifyToken, requireAdmin, getAllBenefits);
+router.get("/redemptions", verifyToken, requireAdmin, getAllRedemptions);
+
 router.post(
   "/",
-  verifyToken,
-  requireAdmin,
+  verifyToken, requireAdmin,
   [
     body("title").trim().notEmpty().withMessage("Título requerido"),
-    body("discount").trim().notEmpty().withMessage("Descuento requerido"),
-    body("category").isIn(["medrano", "campus", "digital"]).withMessage("Categoría inválida"),
+    body("pointsCost").optional().isInt({ min: 0 }),
   ],
   validate,
   createBenefit
 );
+
 router.patch("/:id", verifyToken, requireAdmin, updateBenefit);
 router.delete("/:id", verifyToken, requireAdmin, deleteBenefit);
 

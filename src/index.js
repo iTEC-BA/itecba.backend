@@ -22,7 +22,6 @@ import linksRoutes from "./modules/links/link.routes.js";
 import courseRoutes from "./modules/courses/course.routes.js";
 import aiRoutes from "./modules/ais/ai.routes.js";
 import usersRoutes from "./modules/users/user.routes.js";
-import rewardRoutes from "./modules/rewards/reward.routes.js";
 import messageRoutes from "./modules/messages/message.routes.js";
 import materiasRoutes from "./modules/materias/materias.routes.js";
 import benefitRoutes from "./modules/benefits/benefit.routes.js";
@@ -34,6 +33,7 @@ import trueketecRoutes from "./modules/trueketec/trueketec.routes.js";
 import aulasRoutes from "./modules/aulas/aula.routes.js";
 import progressRoutes from "./modules/progress/progress.routes.js";
 import padronRoutes from "./modules/padron/padron.routes.js";
+import pointsRoutes from "./modules/points/points.routes.js";
 
 import { cleanExpiredPosts } from "./modules/trueketec/trueketec.controller.js";
 import { initWebPush } from "./modules/notifications/notification.controller.js";
@@ -120,7 +120,6 @@ app.use("/api/links", linksRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/users", usersRoutes);
-app.use("/api/rewards", rewardRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/materias", materiasRoutes);
 app.use("/api/benefits", benefitRoutes);
@@ -133,6 +132,7 @@ app.use("/api/trueketec", trueketecRoutes);
 app.use("/api/aulas", aulasRoutes);
 app.use("/api/progress", progressRoutes);
 app.use("/api/padron", padronRoutes);
+app.use("/api/points", pointsRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>
