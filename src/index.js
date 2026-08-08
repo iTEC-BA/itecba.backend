@@ -34,6 +34,7 @@ import aulasRoutes from "./modules/aulas/aula.routes.js";
 import progressRoutes from "./modules/progress/progress.routes.js";
 import padronRoutes from "./modules/padron/padron.routes.js";
 import pointsRoutes from "./modules/points/points.routes.js";
+import pageAccessRoutes from "./modules/pageAccess/pageAccess.routes.js";
 
 import { cleanExpiredPosts } from "./modules/trueketec/trueketec.controller.js";
 import { initWebPush } from "./modules/notifications/notification.controller.js";
@@ -133,6 +134,7 @@ app.use("/api/aulas", aulasRoutes);
 app.use("/api/progress", progressRoutes);
 app.use("/api/padron", padronRoutes);
 app.use("/api/points", pointsRoutes);
+app.use("/api/page-access", pageAccessRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>
