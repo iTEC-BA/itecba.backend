@@ -23,7 +23,7 @@ import courseRoutes from "./modules/courses/course.routes.js";
 import aiRoutes from "./modules/ais/ai.routes.js";
 import usersRoutes from "./modules/users/user.routes.js";
 import messageRoutes from "./modules/messages/message.routes.js";
-import materiasRoutes from "./modules/materias/materias.routes.js";
+import subjectsRoutes from "./modules/subjects/subjects.routes.js";
 import benefitRoutes from "./modules/benefits/benefit.routes.js";
 import faqRoutes from "./modules/faq/faq.routes.js";
 import forumRoutes from "./modules/forum/forum.routes.js";
@@ -122,7 +122,7 @@ app.use("/api/courses", courseRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/messages", messageRoutes);
-app.use("/api/materias", materiasRoutes);
+app.use("/api/subjects", subjectsRoutes);
 app.use("/api/benefits", benefitRoutes);
 app.use("/api/faqs", faqRoutes); // alias plural (frontend usa /faqs)
 app.use("/api/faq", faqRoutes);
