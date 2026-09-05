@@ -1,4 +1,3 @@
-// Clases de error con semántica HTTP clara
 export class AppError extends Error {
   constructor(message, statusCode = 500) {
     super(message);
@@ -6,14 +5,10 @@ export class AppError extends Error {
     this.isOperational = true;
   }
 }
-export const notFound = (message = "Recurso no encontrado") =>
-  new AppError(message, 404);
-export const badRequest = (message = "Datos inválidos") =>
-  new AppError(message, 400);
-export const unauthorized = (message = "No autorizado") =>
-  new AppError(message, 401);
-export const forbidden = (message = "Acceso denegado") =>
-  new AppError(message, 403);
+export const notFound = (message = "Recurso no encontrado") => new AppError(message, 404);
+export const badRequest = (message = "Datos inválidos") => new AppError(message, 400);
+export const unauthorized = (message = "No autorizado") => new AppError(message, 401);
+export const forbidden = (message = "Acceso denegado") => new AppError(message, 403);
 
 // Manejador global de errores — siempre va ÚLTIMO en index.js
 export const errorHandler = (err, req, res, _next) => {
@@ -37,8 +32,15 @@ export const errorHandler = (err, req, res, _next) => {
   const statusCode = err.statusCode || 500;
   const message    = err.isOperational ? err.message : "Error interno del servidor";
 
+  // LOGS DETALLADOS PARA DEBUGGEAR EL FRONTEND
+  console.error(`\n🔴 [ERROR] ${req.method} ${req.originalUrl}`);
+  console.error(`   - Body:`, JSON.stringify(req.body));
+  console.error(`   - Query:`, JSON.stringify(req.query));
+  console.error(`   - Params:`, JSON.stringify(req.params));
+  console.error(`   - Detalle:`, err.message);
+  
   if (!err.isOperational) {
-    console.error(`[UNEXPECTED ERROR] ${req.method} ${req.path}`, err);
+    console.error(err.stack);
   }
 
   res.status(statusCode).json({
