@@ -20,7 +20,7 @@ export const updateUserProfile = async (req, res, next) => {
 
     const ALLOWED = [
       "displayName", "dni", "legajo", "specialty",
-      "careers", "startYear", "photoURL",
+      "careers", "startYear", "photoURL", "bio", "github",
     ];
     const update = {};
     for (const key of ALLOWED) {

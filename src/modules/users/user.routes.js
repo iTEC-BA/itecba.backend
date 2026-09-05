@@ -23,12 +23,14 @@ router.patch(
     body("dni").optional().trim().isLength({ max: 20 }),
     body("legajo").optional().trim().isLength({ max: 20 }),
     body("specialty").optional().trim().isLength({ max: 80 }),
-    body("careers").optional().isArray({ max: 2 }),
+    body("careers").optional().isArray({ max: 5 }),
     body("startYear")
       .optional()
       .isInt({ min: 1990, max: new Date().getFullYear() })
       .toInt(),
     body("phone").optional().trim().isLength({ max: 20 }),
+    body("bio").optional().trim().isLength({ max: 300 }),
+    body("github").optional().trim().isURL(),
     body("photoURL").optional().trim().isURL(),
   ],
   validate,
