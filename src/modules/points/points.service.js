@@ -1,106 +1,70 @@
-// src/modules/points/points.service.js
-// Función centralizada de otorgamiento de puntos.
-// Cualquier controlador la importa y llama con una sola línea.
-// NUNCA lanza excepciones al llamante — falla silenciosamente.
 import admin from "firebase-admin";
-import Activity from "./activity.model.js";
-import PointLog from "./pointLog.model.js";
+import { supabase } from "../../config/supabase.js";
 
-// ── Inicialización: puebla la colección si está vacía ────────────────────────
-export const seedActivitiesIfEmpty = async () => {
-  try {
-    const count = await Activity.countDocuments();
-    if (count > 0) return;
-    await Activity.insertMany();
-    console.log("🟢 [Points] Actividades por defecto cargadas en MongoDB.");
-  } catch (err) {
-    console.error(
-      "🔴 [Points] Error al cargar actividades por defecto:",
-      err.message,
-    );
-  }
-};
-
-/**
- * Otorga puntos a un usuario por una actividad dada.
- * Respeta cooldown y tope diario configurados en MongoDB.
- * Actualiza Firestore con FieldValue.increment (atómico).
- *
- * @param {string}  uid          – Firebase UID del usuario
- * @param {string}  activityKey  – Key de la actividad (ej: "forum_post")
- * @param {object}  [context]    – Datos opcionales de contexto para el log (postId, etc.)
- * @returns {{ granted: boolean, points: number, reason?: string }}
- */
 export const grantPoints = async (uid, activityKey, context = {}) => {
   try {
-    // ── 1. Buscar actividad en MongoDB ───────────────────────────────────────
-    const activity = await Activity.findOne({ key: activityKey }).lean();
+    // 1. Buscar actividad en Supabase
+    const { data: activity, error: actErr } = await supabase
+      .from("point_activities")
+      .select("*")
+      .eq("key", activityKey)
+      .single();
 
-    if (!activity) {
-      return { granted: false, reason: "activity_not_found" };
-    }
-    if (!activity.isActive) {
-      return { granted: false, reason: "activity_inactive" };
-    }
+    if (actErr || !activity) return { granted: false, reason: "activity_not_found" };
+    if (!activity.is_active) return { granted: false, reason: "activity_inactive" };
 
     const now = new Date();
 
-    // ── 2. Verificar cooldown ────────────────────────────────────────────────
-    if (activity.cooldownMinutes > 0) {
-      const cooldownMs = activity.cooldownMinutes * 60 * 1000;
-      const since = new Date(now.getTime() - cooldownMs);
+    // 2. Verificar cooldown
+    if (activity.cooldown_minutes > 0) {
+      const cooldownMs = activity.cooldown_minutes * 60 * 1000;
+      const since = new Date(now.getTime() - cooldownMs).toISOString();
 
-      const recent = await PointLog.findOne({
-        uid,
-        activityKey,
-        createdAt: { $gte: since },
-      }).lean();
+      const { data: recent } = await supabase
+        .from("point_logs")
+        .select("id")
+        .eq("uid", uid)
+        .eq("activity_key", activityKey)
+        .gte("created_at", since)
+        .limit(1);
 
-      if (recent) {
-        return { granted: false, reason: "cooldown" };
-      }
+      if (recent && recent.length > 0) return { granted: false, reason: "cooldown" };
     }
 
-    // ── 3. Verificar tope diario ─────────────────────────────────────────────
-    if (activity.dailyCap > 0) {
+    // 3. Verificar tope diario
+    if (activity.daily_cap > 0) {
       const startOfDay = new Date(now);
       startOfDay.setHours(0, 0, 0, 0);
 
-      const todayCount = await PointLog.countDocuments({
-        uid,
-        activityKey,
-        createdAt: { $gte: startOfDay },
-      });
+      const { count } = await supabase
+        .from("point_logs")
+        .select("*", { count: "exact", head: true })
+        .eq("uid", uid)
+        .eq("activity_key", activityKey)
+        .gte("created_at", startOfDay.toISOString());
 
-      if (todayCount >= activity.dailyCap) {
-        return { granted: false, reason: "daily_cap_reached" };
-      }
+      if (count >= activity.daily_cap) return { granted: false, reason: "daily_cap_reached" };
     }
 
-    // ── 4. Sumar puntos en Firestore (atómico) ───────────────────────────────
+    // 4. Sumar puntos en Firestore (atómico)
     const db = admin.firestore();
     const userRef = db.collection("users").doc(uid);
-
     await userRef.update({
       points: admin.firestore.FieldValue.increment(activity.points),
     });
 
-    // ── 5. Registrar en el log ───────────────────────────────────────────────
-    await PointLog.create({
+    // 5. Registrar en el log de Supabase
+    await supabase.from("point_logs").insert({
       uid,
-      activityKey,
-      pointsAwarded: activity.points,
+      activity_key: activityKey,
+      points_awarded: activity.points,
       context,
-      createdAt: now,
+      created_at: now.toISOString()
     });
 
     return { granted: true, points: activity.points };
   } catch (err) {
-    // Falla silenciosamente para nunca romper el controlador llamante
-    console.error(
-      `[Points] Error al otorgar puntos (uid=${uid}, activity=${activityKey}):`,
-      err.message,
-    );
+    console.error(`[Points] Error al otorgar puntos:`, err.message);
     return { granted: false, reason: "internal_error" };
   }
 };

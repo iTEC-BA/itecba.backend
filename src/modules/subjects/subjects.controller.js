@@ -15,28 +15,26 @@ export const getSubjects = async (req, res, next) => {
     let query = supabase
       .from('subjects')
       .select('id, subject_key, materia, codigo, carrera, nivel, sigla')
+      .order('nivel', { ascending: true })
       .order('materia', { ascending: true });
 
-    // Protección anti-strings "undefined"
-    if (carrera && carrera !== 'undefined') query = query.eq('carrera', carrera);
-    if (nivel !== undefined && nivel !== '' && nivel !== 'undefined') query = query.eq('nivel', Number(nivel));
+    // 🌟 LA MAGIA OCURRE AQUÍ: Buscamos las materias de la carrera elegida + las homogéneas
+    if (carrera && carrera !== 'undefined') {
+      query = query.in('carrera', [carrera, 'homogeneas']);
+    }
+
+    // Filtramos por nivel si el frontend lo solicita
+    if (nivel !== undefined && nivel !== '' && nivel !== 'undefined') {
+      query = query.eq('nivel', Number(nivel));
+    }
 
     const { data, error } = await query;
 
     if (error) {
-      log.error(ctx, 'Error de Supabase al consultar subjects', { message: error.message });
+      log.error(ctx, 'Error de Supabase', { message: error.message });
       throw new Error(error.message);
     }
 
-    // Diagnóstico inteligente de RLS
-    if (!data || data.length === 0) {
-      const { count } = await supabase.from('subjects').select('*', { count: 'exact', head: true });
-      if (count > 0) {
-        log.warn(ctx, `⚠️ Hay ${count} materias en BD, pero Supabase devolvió 0. ¡Revisa el RLS (Row Level Security)!`);
-      }
-    }
-
-    log.info(ctx, 'Consulta resuelta', { resultados: data?.length ?? 0 });
     res.status(200).json(data || []);
   } catch (err) {
     log.error(ctx, 'Excepción no controlada', { message: err.message });
@@ -74,7 +72,9 @@ export const getCarreras = async (req, res, next) => {
   try {
     const { data, error } = await supabase.from('subjects').select('carrera').order('carrera');
     if (error) throw new Error(error.message);
-    res.status(200).json([...new Set((data || []).map((r) => r.carrera))]);
+    // Excluimos la etiqueta "homogeneas" para que no aparezca como una carrera seleccionable en la UI
+    const carreras = [...new Set((data || []).map((r) => r.carrera))].filter(c => c !== 'homogeneas');
+    res.status(200).json(carreras);
   } catch (err) { next(err); }
 };
 
