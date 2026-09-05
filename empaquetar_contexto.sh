@@ -9,7 +9,7 @@ if [ -z "$1" ]; then
 fi
 
 MODULE=$1
-OUTPUT="contexto_${MODULE}_ia.txt"
+OUTPUT="contexto_backend_seccion_${MODULE}.txt"
 
 echo "📄 Generando consolidado para el módulo '$MODULE' en $OUTPUT..."
 

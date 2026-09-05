@@ -2,20 +2,22 @@
 // Función centralizada de otorgamiento de puntos.
 // Cualquier controlador la importa y llama con una sola línea.
 // NUNCA lanza excepciones al llamante — falla silenciosamente.
-import admin       from "firebase-admin";
-import Activity    from "./activity.model.js";
-import PointLog    from "./pointLog.model.js";
-import { DEFAULT_ACTIVITIES } from "./defaultActivities.js";
+import admin from "firebase-admin";
+import Activity from "./activity.model.js";
+import PointLog from "./pointLog.model.js";
 
 // ── Inicialización: puebla la colección si está vacía ────────────────────────
 export const seedActivitiesIfEmpty = async () => {
   try {
     const count = await Activity.countDocuments();
     if (count > 0) return;
-    await Activity.insertMany(DEFAULT_ACTIVITIES);
+    await Activity.insertMany();
     console.log("🟢 [Points] Actividades por defecto cargadas en MongoDB.");
   } catch (err) {
-    console.error("🔴 [Points] Error al cargar actividades por defecto:", err.message);
+    console.error(
+      "🔴 [Points] Error al cargar actividades por defecto:",
+      err.message,
+    );
   }
 };
 
@@ -46,7 +48,7 @@ export const grantPoints = async (uid, activityKey, context = {}) => {
     // ── 2. Verificar cooldown ────────────────────────────────────────────────
     if (activity.cooldownMinutes > 0) {
       const cooldownMs = activity.cooldownMinutes * 60 * 1000;
-      const since      = new Date(now.getTime() - cooldownMs);
+      const since = new Date(now.getTime() - cooldownMs);
 
       const recent = await PointLog.findOne({
         uid,
@@ -76,7 +78,7 @@ export const grantPoints = async (uid, activityKey, context = {}) => {
     }
 
     // ── 4. Sumar puntos en Firestore (atómico) ───────────────────────────────
-    const db      = admin.firestore();
+    const db = admin.firestore();
     const userRef = db.collection("users").doc(uid);
 
     await userRef.update({
@@ -93,10 +95,12 @@ export const grantPoints = async (uid, activityKey, context = {}) => {
     });
 
     return { granted: true, points: activity.points };
-
   } catch (err) {
     // Falla silenciosamente para nunca romper el controlador llamante
-    console.error(`[Points] Error al otorgar puntos (uid=${uid}, activity=${activityKey}):`, err.message);
+    console.error(
+      `[Points] Error al otorgar puntos (uid=${uid}, activity=${activityKey}):`,
+      err.message,
+    );
     return { granted: false, reason: "internal_error" };
   }
 };
