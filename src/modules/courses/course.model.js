@@ -35,6 +35,9 @@ const courseSchema = new mongoose.Schema(
     playlistId: { type: String, default: "" },
     materia: { type: String, default: "" },
     // NUEVO: soporte para más de un profesor/docente a cargo del curso.
+    // Markdown libre: sin límite de longitud, se renderiza tal cual en el
+    // frontend con <MarkdownContent/> (permite *negrita*, [links](url), etc.
+    // en el nombre o una breve bio del profesor).
     profesores: { type: [{ type: String, trim: true }], default: [] },
     categoria: { type: String, enum: ["Oficial", "Comunidad"], default: "Comunidad" },
     status: { type: String, enum: ["draft", "approved", "archived"], default: "approved" },

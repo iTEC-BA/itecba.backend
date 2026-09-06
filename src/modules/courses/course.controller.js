@@ -21,6 +21,9 @@ const parsePagination = (query) => {
 // NUEVO: normaliza el array de profesores recibido desde el frontend
 // (soporta más de un profesor por curso). Descarta strings vacíos y
 // recorta espacios; si no llega nada válido devuelve un array vacío.
+// Soporta Markdown: no se escapan ni filtran caracteres como *, _, #, [], etc.
+// El renderizado seguro (sanitización de HTML embebido) es responsabilidad
+// del frontend (<MarkdownContent/> vía react-markdown, que no ejecuta HTML crudo).
 const normalizeProfesores = (input) => {
   if (!Array.isArray(input)) return [];
   return input
