@@ -1,28 +1,32 @@
-// src/modules/courses/course.model.js
 import mongoose from "mongoose";
 import { normalizeStr } from "../../utils/normalize.js";
 
-// ── Subdocumento: Video individual ──────────────────────────────────────────
-const videoSchema = new mongoose.Schema(
-  {
-    youtubeId: { type: String, required: true, trim: true },
-    title: { type: String, required: true, trim: true },
-    duration: { type: String, default: "0:00" },
+const lessonSchema = new mongoose.Schema({
+  title: { type: String, required: true, trim: true },
+  slug: { type: String, trim: true },
+  description: { type: String, default: "" }, // NUEVO: Apuntes de clase en Markdown/LaTeX
+  type: { type: String, enum: ["video", "exam", "article"], default: "video" },
+  isPremium: { type: Boolean, default: false },
+  youtubeId: { type: String, trim: true },
+  mediaUrl: { type: String, trim: true },
+  duration: { type: String, default: "0:00" },
+  orderIndex: { type: Number, default: 0 },
+  brokenReports: [
+    {
+      reportedBy: { type: String },
+      reason: { type: String, default: "no-reproduce" },
+      createdAt: { type: Date, default: Date.now },
+    },
+  ],
+  isBroken: { type: Boolean, default: false },
+});
 
-    // Reportes de video roto
-    brokenReports: [
-      {
-        reportedBy: { type: String },
-        reason: { type: String, default: "no-reproduce" },
-        createdAt: { type: Date, default: Date.now },
-      },
-    ],
-    isBroken: { type: Boolean, default: false },
-  },
-  { _id: true },
-);
+const sectionSchema = new mongoose.Schema({
+  title: { type: String, required: true, trim: true },
+  orderIndex: { type: Number, default: 0 },
+  lessons: [lessonSchema],
+});
 
-// ── Esquema principal del Curso ─────────────────────────────────────────────
 const courseSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
@@ -30,60 +34,41 @@ const courseSchema = new mongoose.Schema(
     imageUrl: { type: String, default: "" },
     playlistId: { type: String, default: "" },
     materia: { type: String, default: "" },
-
-    categoria: {
-      type: String,
-      enum: ["Oficial", "Comunidad"],
-      default: "Comunidad",
-    },
-    status: {
-      type: String,
-      enum: ["draft", "approved", "archived"],
-      default: "approved",
-    },
-
-    videos: [videoSchema],
-
+    // NUEVO: soporte para más de un profesor/docente a cargo del curso.
+    profesores: { type: [{ type: String, trim: true }], default: [] },
+    categoria: { type: String, enum: ["Oficial", "Comunidad"], default: "Comunidad" },
+    status: { type: String, enum: ["draft", "approved", "archived"], default: "approved" },
+    sections: [sectionSchema],
     createdBy: { type: String, default: "" },
-
-    /**
-     * Campo desnormalizado para búsquedas rápidas sin tildes.
-     * Se regenera automáticamente en cada save.
-     * Ejemplo: "algebra y geometria analitica"
-     */
-    _searchable: { type: String, default: "" }, // ✅ Se eliminó `index: true` duplicado
+    _searchable: { type: String, default: "" },
+    videos: { type: Array, select: false } 
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
-// ── Pre-save: actualiza _searchable ─────────────────────────────────────────
-// ✅ Se eliminó el parámetro `next` y la llamada `next()`
 courseSchema.pre("save", function () {
-  this._searchable = normalizeStr(
-    `${this.title} ${this.description} ${this.materia}`,
-  );
+  const profesoresStr = Array.isArray(this.profesores) ? this.profesores.join(" ") : "";
+  this._searchable = normalizeStr(`${this.title} ${this.description} ${this.materia} ${profesoresStr}`);
 });
 
-// ── Pre-findOneAndUpdate: actualiza _searchable en updates ───────────────────
-// ✅ Se eliminó el parámetro `next` y la llamada `next()`
 courseSchema.pre("findOneAndUpdate", function () {
   const upd = this.getUpdate();
   const title = upd?.title ?? upd?.$set?.title;
   const desc = upd?.description ?? upd?.$set?.description ?? "";
   const mat = upd?.materia ?? upd?.$set?.materia ?? "";
-
+  const profesores = upd?.profesores ?? upd?.$set?.profesores ?? [];
+  const profesoresStr = Array.isArray(profesores) ? profesores.join(" ") : "";
   if (title) {
-    const searchable = normalizeStr(`${title} ${desc} ${mat}`);
+    const searchable = normalizeStr(`${title} ${desc} ${mat} ${profesoresStr}`);
     if (upd.$set) upd.$set._searchable = searchable;
     else this.setUpdate({ ...upd, _searchable: searchable });
   }
 });
 
-// ── Índices ─────────────────────────────────────────────────────────────────
 courseSchema.index({ status: 1 });
 courseSchema.index({ materia: 1 });
-courseSchema.index({ _searchable: 1 }); // búsqueda normalizada
-courseSchema.index({ "videos.isBroken": 1 });
+courseSchema.index({ _searchable: 1 });
+courseSchema.index({ "sections.lessons.isBroken": 1 });
 courseSchema.index({ createdAt: -1 });
 
 export default mongoose.model("Course", courseSchema);

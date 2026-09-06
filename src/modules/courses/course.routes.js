@@ -1,133 +1,68 @@
-// src/modules/courses/course.routes.js
-// IMPORTANTE: Las rutas estáticas (/admin/*, /fetch-playlist) van ANTES de /:id
-// para evitar que Express las interprete como courseId.
+import multer from "multer";
 import { Router }                    from "express";
 import { body, query }               from "express-validator";
 import { validate }                  from "../../middlewares/validate.js";
 import { verifyToken, requireAdmin } from "../../middlewares/authMiddleware.js";
 import {
-  getCourses,
-  getAllCourses,
-  getCourseById,
-  createCourse,
-  updateCourse,
-  updateCourseStatus,
-  deleteCourse,
-  fetchPlaylist,
-  reportBrokenVideo,
-  getBrokenVideos,
-  fixBrokenVideo,
-  deleteVideo,
-  clearVideoReports,
+  getCourses, getAllCourses, getCourseById, createCourse, updateCourse,
+  updateCourseStatus, deleteCourse, fetchPlaylist, reportBrokenVideo,
+  getBrokenVideos, fixBrokenVideo, deleteVideo, clearVideoReports, migrateLegacyCourses, uploadCover
 } from "./course.controller.js";
 
 const router = Router();
 
-// ── Públicas ──────────────────────────────────────────────────────────────────
-// GET /api/courses?search=analisis&materia=X&categoria=Oficial&page=1&limit=9
-router.get(
-  "/",
-  [
+router.get("/", [
     query("search").optional().trim().isLength({ max: 100 }),
     query("materia").optional().trim(),
     query("categoria").optional().isIn(["Oficial", "Comunidad", ""]),
     query("page").optional().isInt({ min: 1 }),
     query("limit").optional().isInt({ min: 1, max: 50 }),
-  ],
-  validate,
-  getCourses
-);
+  ], validate, getCourses);
 
-// ── Admin: rutas estáticas (DEBEN ir ANTES de /:id) ──────────────────────────
-// FIX: sin este orden, "admin/broken-videos" sería capturado por /:id
-router.get(
-  "/admin/all",
-  verifyToken, requireAdmin,
-  getAllCourses
-);
+router.get("/admin/all", verifyToken, requireAdmin, getAllCourses);
+router.get("/admin/broken-videos", verifyToken, requireAdmin, getBrokenVideos);
+// FIX: esta ruta encadenaba por error el middleware `uploadCover` (que espera
+// un archivo multipart y ya no se ejecutaba porque migrateLegacyCourses corta
+// la respuesta antes). Se deja únicamente el handler de la migración.
+router.post("/admin/migrate-legacy", verifyToken, requireAdmin, migrateLegacyCourses);
 
-router.get(
-  "/admin/broken-videos",
-  verifyToken, requireAdmin,
-  getBrokenVideos
-);
+router.post("/fetch-playlist", verifyToken, requireAdmin, [
+    body("playlistUrl").trim().notEmpty().withMessage("playlistUrl requerida")
+  ], validate, fetchPlaylist);
 
-router.post(
-  "/fetch-playlist",
-  verifyToken, requireAdmin,
-  [body("playlistUrl").trim().notEmpty().withMessage("playlistUrl requerida")],
-  validate,
-  fetchPlaylist
-);
-
-// ── Admin: CRUD general ───────────────────────────────────────────────────────
-router.post(
-  "/",
-  verifyToken, requireAdmin,
-  [
+// CORRECCIÓN: Validación adaptada a la jerarquía de secciones
+router.post("/", verifyToken, requireAdmin, [
     body("title").trim().notEmpty().withMessage("title requerido"),
-    body("videos").isArray({ min: 1 }).withMessage("Se requiere al menos 1 video"),
+    body("sections").isArray({ min: 1 }).withMessage("Se requiere al menos 1 sección con lecciones"),
     body("categoria").optional().isIn(["Oficial", "Comunidad"]),
     body("status").optional().isIn(["draft", "approved", "archived"]),
-  ],
-  validate,
-  createCourse
-);
+    // NUEVO: permite declarar uno o más profesores al crear el curso.
+    body("profesores").optional().isArray().withMessage("profesores debe ser un array de nombres"),
+  ], validate, createCourse);
 
-// ── Rutas con :id (SIEMPRE al final para no colisionar) ──────────────────────
 router.get("/:id", getCourseById);
+router.put("/:id", verifyToken, requireAdmin, [
+    body("profesores").optional().isArray().withMessage("profesores debe ser un array de nombres"),
+  ], validate, updateCourse);
 
-router.put(
-  "/:id",
-  verifyToken, requireAdmin,
-  updateCourse
-);
+router.patch("/:id/status", verifyToken, requireAdmin, [
+    body("status").isIn(["draft", "approved", "archived"]).withMessage("status inválido")
+  ], validate, updateCourseStatus);
 
-router.patch(
-  "/:id/status",
-  verifyToken, requireAdmin,
-  [body("status").isIn(["draft", "approved", "archived"]).withMessage("status inválido")],
-  validate,
-  updateCourseStatus
-);
+router.delete("/:id", verifyToken, requireAdmin, deleteCourse);
+router.patch("/:id/videos/:videoId", verifyToken, requireAdmin, fixBrokenVideo);
+router.delete("/:id/videos/:videoId", verifyToken, requireAdmin, deleteVideo);
+router.delete("/:id/videos/:videoId/reports", verifyToken, requireAdmin, clearVideoReports);
 
-router.delete(
-  "/:id",
-  verifyToken, requireAdmin,
-  deleteCourse
-);
+router.post("/:id/videos/:videoId/report", verifyToken, [
+    body("reason").optional().isIn(["no-reproduce", "error-404", "privado", "contenido-incorrecto"]).withMessage("reason inválido"),
+  ], validate, reportBrokenVideo);
 
-// ── Admin: gestión de videos en curso ─────────────────────────────────────────
-router.patch(
-  "/:id/videos/:videoId",
-  verifyToken, requireAdmin,
-  fixBrokenVideo
-);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
-router.delete(
-  "/:id/videos/:videoId",
-  verifyToken, requireAdmin,
-  deleteVideo
-);
-
-router.delete(
-  "/:id/videos/:videoId/reports",
-  verifyToken, requireAdmin,
-  clearVideoReports
-);
-
-// ── Autenticado: reportar video ───────────────────────────────────────────────
-router.post(
-  "/:id/videos/:videoId/report",
-  verifyToken,
-  [
-    body("reason")
-      .optional()
-      .isIn(["no-reproduce", "error-404", "privado", "contenido-incorrecto"])
-      .withMessage("reason inválido"),
-  ],
-  validate,
-  reportBrokenVideo
-);
+router.post("/upload-cover", verifyToken, requireAdmin, upload.single("cover"), uploadCover);
 
 export default router;
