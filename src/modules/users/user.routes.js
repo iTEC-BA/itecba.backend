@@ -9,9 +9,14 @@ import {
   updateUserRole,
   updateUserPoints,
   updateUserProfile,
+  registerWithEmailPassword,
+  getAuthProvider,
 } from "./user.controller.js";
 
 const router = Router();
+
+// ── Registro público para excepciones de correo no institucional ──────────────
+
 
 // ── Ruta del propio usuario (solo verifyToken, SIN requireAdmin) ──────────────
 // IMPORTANTE: debe definirse ANTES del router.use(requireAdmin) de abajo
@@ -35,6 +40,15 @@ router.patch(
   ],
   validate,
   updateUserProfile,
+);
+
+// __ITEC_AUTOPATCH_AUTH_PROVIDER_ROUTE__
+// ── Consulta pública de proveedor de auth (para mensajes de error en login) ───
+router.get(
+  "/auth-provider",
+  [query("email").isEmail().withMessage("Email inválido")],
+  validate,
+  getAuthProvider,
 );
 
 // ── Todas las rutas siguientes son exclusivas de admin ────────────────────────

@@ -92,6 +92,92 @@ export const searchUserByEmail = async (req, res, next) => {
   }
 };
 
+
+
+// POST /api/users/register-exception  — alta de cuenta correo/contraseña
+// para emails no institucionales previamente autorizados en emailExceptions.
+export const registerWithEmailPassword = async (req, res, next) => {
+  try {
+    const { email, password, displayName } = req.body;
+    const normalized = String(email || "").trim().toLowerCase();
+    console.log('/ __DEBUG_REGISTER__ body recibido:', { email, normalized, passwordLength: password?.length, displayName });
+
+    if (normalized.endsWith("@frba.utn.edu.ar")) {
+      return next(badRequest("Los correos institucionales ingresan con Google."));
+    }
+
+    const allowed = await isEmailException(normalized);
+    if (!allowed) {
+      return next(badRequest("Este correo no está autorizado para acceder a la plataforma."));
+    }
+
+        // __ITEC_AUTOPATCH_AUTH_PROVIDER__
+    const existing = await authFirebase.getUserByEmail(normalized).catch(() => null);
+
+    if (existing) {
+      // ¿La cuenta tiene contraseña seteada, o es 100% de un proveedor externo
+      // (ej. Google Sign-In)? providerData no incluye "password" en ese caso.
+      const hasPasswordProvider = existing.providerData?.some(
+        (p) => p.providerId === "password",
+      );
+
+      if (!hasPasswordProvider) {
+        // __ITEC_AUTOPATCH_SYNC_GOOGLE_EXCEPTION__
+        // Esta cuenta ya pasó la validación isEmailException(normalized) de
+        // arriba (si no, ya hubiésemos retornado 400 antes), así que el email
+        // está autorizado. Sincronizamos el doc de Firestore para que
+        // loginWithGoogle / initAuthListener la reconozcan a partir de ahora
+        // — sin esto, cuentas creadas por Google ANTES del sistema de
+        // excepciones quedan en un bucle: no pueden registrarse por password
+        // (ya existen) y loginWithGoogle las rechaza (el flag nunca se seteó).
+        await dbFirebase.collection("users").doc(existing.uid).set(
+          { isEmailException: true },
+          { merge: true },
+        );
+
+        const externalProvider = existing.providerData?.[0]?.providerId;
+        const providerLabel =
+          externalProvider === "google.com" ? "Google" : "otro método";
+
+        return next(
+          badRequest(
+            `Este correo ya está registrado con ${providerLabel}. Iniciá sesión con el botón de ${providerLabel} en vez de crear una cuenta con contraseña.`,
+          ),
+        );
+      }
+
+      return next(badRequest("Ya existe una cuenta con ese correo. Iniciá sesión."));
+    }
+
+    console.log('/ __DEBUG_REGISTER__ llamando createUser con email:', normalized, '| passwordLength:', password?.length);
+    const userRecord = await authFirebase.createUser({
+      email: normalized,
+      password,
+      displayName: displayName || "Estudiante",
+    });
+    console.log('/ __DEBUG_REGISTER__ createUser OK. uid:', userRecord.uid, '| email en userRecord:', userRecord.email, '| providerData:', JSON.stringify(userRecord.providerData));
+
+    await dbFirebase.collection("users").doc(userRecord.uid).set({
+      name: displayName || "Estudiante",
+      email: normalized,
+      role: "student",
+      points: 0,
+      isEmailException: true,
+    });
+
+    res.status(201).json({ uid: userRecord.uid, email: normalized, message: "Cuenta creada" });
+  } catch (err) {
+    console.error('/ __DEBUG_REGISTER__ error completo en registerWithEmailPassword:', err);
+    if (err.code === "auth/email-already-exists") {
+      return next(badRequest("Ya existe una cuenta con ese correo."));
+    }
+    if (err.code === "auth/invalid-password") {
+      return next(badRequest("La contraseña debe tener al menos 6 caracteres."));
+    }
+    next(err);
+  }
+};
+
 // PATCH /api/users/:uid/role  — cambiar rol (admin)
 export const updateUserRole = async (req, res, next) => {
   try {
@@ -181,6 +267,38 @@ export const updateUserProfile = async (req, res, next) => {
       uid,
       updated: Object.keys(update),
       message: "Perfil actualizado",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+// GET /api/users/auth-provider?email=xxx — info pública mínima para dar
+// mensajes de error más claros en el login (no requiere estar autenticado).
+export const getAuthProvider = async (req, res, next) => {
+  try {
+    const { email } = req.query;
+    const normalized = String(email || "").trim().toLowerCase();
+    if (!normalized) return next(badRequest("Parámetro email requerido"));
+
+    const userRecord = await authFirebase
+      .getUserByEmail(normalized)
+      .catch(() => null);
+
+    if (!userRecord) {
+      return res.status(200).json({ exists: false });
+    }
+
+    const hasPasswordProvider = userRecord.providerData?.some(
+      (p) => p.providerId === "password",
+    );
+    const externalProvider = userRecord.providerData?.find(
+      (p) => p.providerId !== "password",
+    )?.providerId;
+
+    res.status(200).json({
+      exists: true,
+      hasPassword: !!hasPasswordProvider,
+      provider: hasPasswordProvider ? "password" : (externalProvider ?? null),
     });
   } catch (err) {
     next(err);

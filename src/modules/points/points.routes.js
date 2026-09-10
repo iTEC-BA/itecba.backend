@@ -1,4 +1,3 @@
-// src/modules/points/points.routes.js
 import { Router }                    from "express";
 import { body, param }               from "express-validator";
 import { validate }                  from "../../middlewares/validate.js";
@@ -13,10 +12,10 @@ import {
 
 const router = Router();
 
-// Públicas ────────────────────────────────────────────────────────────────────
+// Públicas
 router.get("/activities", getPublicActivities);
 
-// Admin ───────────────────────────────────────────────────────────────────────
+// Admin
 router.get(
   "/activities/admin",
   verifyToken, requireAdmin,
@@ -27,7 +26,7 @@ router.patch(
   "/activities/:id",
   verifyToken, requireAdmin,
   [
-    param("id").isMongoId().withMessage("ID inválido"),
+    param("id").isString().notEmpty().withMessage("Key inválida"), // FIX: Ya no es MongoID
     body("points").optional().isInt({ min: 0 }).toInt(),
     body("cooldownMinutes").optional().isInt({ min: 0 }).toInt(),
     body("dailyCap").optional().isInt({ min: 0 }).toInt(),
@@ -39,7 +38,7 @@ router.patch(
   updateActivity,
 );
 
-// Autenticados ────────────────────────────────────────────────────────────────
+// Autenticados
 router.post(
   "/grant",
   verifyToken,
