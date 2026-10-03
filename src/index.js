@@ -35,6 +35,7 @@ import progressRoutes from "./modules/progress/progress.routes.js";
 import padronRoutes from "./modules/padron/padron.routes.js";
 import pointsRoutes from "./modules/points/points.routes.js";
 import pageAccessRoutes from "./modules/pageAccess/pageAccess.routes.js";
+import roleRoutes from "./modules/roles/role.routes.js";
 
 import { cleanExpiredPosts } from "./modules/trueketec/trueketec.controller.js";
 import { initWebPush } from "./modules/notifications/notification.controller.js";
@@ -89,7 +90,8 @@ app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 // ── 5. Rate Limiting ──────────────────────────────────────────────────────────
 const baseLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: process.env.NODE_ENV === "production" ? 500 : 1000,
+  skip: (req) => req.method === "OPTIONS" || req.path === "/health",
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -135,6 +137,7 @@ app.use("/api/progress", progressRoutes);
 app.use("/api/padron", padronRoutes);
 app.use("/api/points", pointsRoutes);
 app.use("/api/page-access", pageAccessRoutes);
+app.use("/api/roles", roleRoutes);
 
 // ── 7. Health check (Render lo usa para detectar que el servicio está vivo) ──
 app.get("/health", (_req, res) =>

@@ -7,6 +7,8 @@ const announcementSchema = new mongoose.Schema(
     active: { type: Boolean, default: true },
     isCritical: { type: Boolean, default: false },
     expiresAt: { type: Date, required: true },
+    audienceRoles: { type: [String], default: ["all"] },
+    audienceCareers: { type: [String], default: [] },
   },
   { timestamps: true },
 );

@@ -5,6 +5,8 @@ const linkSchema = new mongoose.Schema(
     title: { type: String, required: true },
     url: { type: String, required: true },
     icon: { type: String, required: true },
+    imageUrl: { type: String, default: "" },
+    sectionId: { type: mongoose.Schema.Types.ObjectId, ref: "LinkSection", default: null },
     order: { type: Number, default: 0 },
   },
   { timestamps: true },

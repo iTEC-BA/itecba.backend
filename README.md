@@ -47,6 +47,7 @@ itecba-backend/
 │   │   ├── resources/                  # Repositorio de apuntes/materiales
 │   │   ├── subjects/                   # Plan de estudios / correlatividades (Supabase)
 │   │   ├── trueketec/                  # Intercambio de comisiones entre alumnos
+│   │   ├── roles/                      # Catalogo de roles y permisos (MongoDB)
 │   │   └── users/                      # Administracion de usuarios (Firebase Auth)
 │   └── utils/
 │       └── normalize.js              # Normalizacion de strings para busqueda (sin tildes)
@@ -135,9 +136,21 @@ Prefijo: `/api/announcements`
 
 | Metodo | Ruta | Auth | Descripcion |
 |---|---|---|---|
-| GET | `/active` | Publico | Devuelve los anuncios activos, ordenados por criticidad y fecha. Antes de responder, desactiva en la misma llamada (`updateMany`) los anuncios cuyo `expiresAt` ya paso, evitando necesitar un cron aparte. |
-| POST | `/` | Admin | Crea un anuncio. Calcula `expiresAt` a partir de `hoursActive` (default 24h, max 168h). Si `isCritical=true`, dispara un **push broadcast** a todos los suscriptores. |
+| GET | `/active` | Publico (token opcional) | Devuelve los anuncios activos, ordenados por criticidad y fecha. Con token filtra por `audienceRoles` y `audienceCareers`; sin filtros el anuncio es global. Antes de responder, desactiva en la misma llamada (`updateMany`) los anuncios cuyo `expiresAt` ya paso. |
+| POST | `/` | Admin | Crea un anuncio con `audienceRoles` y `audienceCareers` opcionales. Las condiciones se combinan con AND: coincide el rol y, si se indican carreras, al menos una carrera. Solo los avisos críticos globales disparan un **push broadcast**; los segmentados no se envían globalmente. |
 | DELETE | `/:id` | Admin | Desactiva (soft-delete, `active=false`) el anuncio para conservar el historial de auditoria. |
+
+Al cambiar el rol de un usuario desde `PATCH /api/users/:uid/role`, el backend
+envia un correo a su cuenta cuando el rol efectivamente cambia. El mensaje
+incluye el nombre del rol, sus permisos vigentes y botones de acceso a la web
+y descarga. `APP_DOWNLOAD_URL` permite configurar el destino del boton de
+descarga; si no se define, utiliza el primer origen de `FRONTEND_URL`.
+
+El registro de cuentas externas mediante `POST /api/users/register-exception`
+tambien envia un correo de bienvenida con la identidad visual de iTEC, la
+mascota TEC, un boton para iniciar sesion y otro para descargar la aplicacion.
+Las imagenes se cargan desde `/logo.png` y
+`/mascot/TEC-Saludando.webp` del primer origen configurado en `FRONTEND_URL`.
 
 ---
 
@@ -210,7 +223,7 @@ Prefijo: `/api/aulas`
 ### 4. `benefits` — Beneficios y canje de puntos
 Prefijo: `/api/benefits`
 
-**Schemas Mongo:**
+**Tablas Supabase:**
 ```js
 // Benefit
 {
@@ -424,15 +437,35 @@ Prefijo: `/api/links`
 
 **Schema Mongo (`Link`):**
 ```js
-{ title: String, url: String, icon: String, order: Number, timestamps: true }
+{ title: String, url: String, icon: String, imageUrl: String, sectionId: ObjectId|null, order: Number, timestamps: true }
+```
+
+**Schema Mongo (`LinkSection`):**
+```js
+{
+  title: String, description: String,
+  displayType: "chips" | "stories" | "carousel",
+  audienceRoles: ["all" | "student" | "ingresante" | "afiliado" | "profesor" | "moderator" | "admin"],
+  order: Number, isActive: Boolean, timestamps: true
+}
 ```
 
 | Metodo | Ruta | Auth | Descripcion |
 |---|---|---|---|
 | GET | `/` | Publico | Lista de enlaces ordenados por `order`. |
+| GET | `/sections` | Publico | Devuelve las secciones activas con sus links agrupados. |
+| GET | `/sections/all` | Admin | Lista todas las secciones para administrarlas. |
 | POST | `/` | Admin | Crea un enlace (title, url, icon requeridos; url debe empezar con `http` o `/`). |
 | PUT | `/:id` | Admin | Actualiza un enlace. |
 | DELETE | `/:id` | Admin | Elimina un enlace. |
+| POST | `/sections` | Admin | Crea una sección configurable y define su audiencia/formato. |
+| PUT | `/sections/:id` | Admin | Actualiza una sección. |
+| DELETE | `/sections/:id` | Admin | Elimina una sección y devuelve sus links a accesos rápidos. |
+
+La gestión transversal de roles y permisos está documentada en
+[`../ROLES_PERMISSIONS.md`](../ROLES_PERMISSIONS.md), compartida con el
+frontend. Los roles configurables se persisten en MongoDB; la asignación del
+rol de cada usuario continúa en Firestore.
 
 ---
 
@@ -492,7 +525,7 @@ Prefijo: `/api/points`
 
 **Schemas Mongo:**
 ```js
-// PointActivity (catalogo editable por el admin)
+// point_activities (catalogo editable por el admin)
 {
   key:             String,  // unique, ej: "forum_post" — identificador usado en el codigo
   name:            String,  // nombre visible en el panel
@@ -504,7 +537,7 @@ Prefijo: `/api/points`
   timestamps: true
 }
 
-// PointLog (auditoria, TTL 90 dias)
+// point_logs (auditoria)
 {
   uid:           String,  // indexado
   activityKey:   String,
@@ -512,10 +545,10 @@ Prefijo: `/api/points`
   context:       Mixed,   // metadatos libres (postId, resourceId, etc.)
   createdAt:     Date     // TTL index: se autoborra a los 90 dias
 }
-// Indice compuesto: uid + activityKey + createdAt (para chequear cooldown/cap sin ir a Firestore)
+// Los chequeos de cooldown y limite diario se realizan sobre point_logs.
 ```
 
-Actividades por defecto (se siembran automaticamente si la coleccion esta vacia): `forum_post`, `forum_reply`, `resource_upload`, `group_propose`, `profile_complete`, `daily_login`, `trueketec_post` — cada una con sus propios puntos, cooldown y tope diario.
+Actividades esperadas: `forum_post`, `forum_reply`, `resource_upload`, `group_propose`, `profile_complete`, `daily_login`, `trueketec_post`. Deben existir en `point_activities`; el administrador puede activar, desactivar y editar sus reglas. El frontend otorga `daily_login` una vez por usuario y dia, y el backend vuelve a validar cooldown y limite diario.
 
 | Metodo | Ruta | Auth | Descripcion |
 |---|---|---|---|
@@ -670,6 +703,8 @@ Prefijo: `/api/users` — no tiene modelo Mongo: la identidad vive en **Firebase
 | GET | `/count` | Admin | Cantidad total de usuarios registrados en Firebase Auth (paginando internamente de a 1000). Cacheado en memoria por 5 minutos. |
 | GET | `/?limit=&pageToken=` | Admin | Lista paginada de usuarios (usa la paginacion nativa de Firebase Auth `listUsers`), enriquecida con `role` y `points` desde Firestore. |
 | GET | `/search?email=` | Admin | Busca un usuario puntual por email. |
+| DELETE | `/:uid` | Admin | Elimina la cuenta de Firebase Authentication y su perfil de Firestore. No permite eliminar la propia cuenta. |
+| DELETE | `/authorized/:authorizationId` | Admin | Elimina una autorización externa de `users_autorized`. |
 | PATCH | `/:uid/role` | Admin | Cambia el rol de un usuario (`student`/`admin`/`moderator`). Un admin no puede quitarse su propio rol de admin (evita auto-bloqueo). |
 | PATCH | `/:uid/points` | Admin | Suma o resta puntos manualmente (el resultado nunca baja de 0). |
 
@@ -678,7 +713,7 @@ Prefijo: `/api/users` — no tiene modelo Mongo: la identidad vive en **Firebase
 ## Autenticacion y autorizacion (resumen transversal)
 
 * **Identidad:** Firebase Authentication. El frontend obtiene un `idToken` y lo envia como `Authorization: Bearer <token>` en cada request protegido.
-* **Roles:** `student` (default), `moderator`, `admin`, guardados en el documento `users/{uid}` de Firestore. `verifyToken` cachea el rol 5 minutos para reducir lecturas a Firestore.
+* **Roles:** el rol asignado al usuario se guarda en `users/{uid}` de Firestore; el catalogo de roles y sus permisos vive en MongoDB mediante el modulo [`roles`](./src/modules/roles/README.md). `admin` y `moderator` tienen acceso administrativo completo. `verifyToken` cachea la autorizacion 5 minutos para reducir lecturas a Firestore y MongoDB.
 * **Rutas restringidas por dominio de correo:** el modulo `trueketec` exige ademas que el email termine en `@frba.utn.edu.ar`.
 * **Ownership checks:** varios endpoints (`progress/:uid`, `users/:uid/profile`, `trueketec/:id/*`, `forum` delete) verifican explicitamente que `req.user.uid` coincida con el recurso solicitado, ademas del rol.
 
@@ -686,7 +721,7 @@ Prefijo: `/api/users` — no tiene modelo Mongo: la identidad vive en **Firebase
 
 ```
 # Servidor
-PORT, NODE_ENV, FRONTEND_URL
+PORT, NODE_ENV, FRONTEND_URL, APP_DOWNLOAD_URL
 
 # MongoDB
 MONGODB_URI

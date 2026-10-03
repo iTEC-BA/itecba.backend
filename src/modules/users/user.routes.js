@@ -5,10 +5,16 @@ import { verifyToken, requireAdmin } from "../../middlewares/authMiddleware.js";
 import {
   getUsers,
   getUsersCount,
+  getAdminUsers,
+  getAuthorizedUsers,
   searchUserByEmail,
   updateUserRole,
   updateUserPoints,
   updateUserProfile,
+  createAuthorizedUser,
+  updateAuthorizedUser,
+  deleteAuthorizedUser,
+  deleteUser,
   registerWithEmailPassword,
   getAuthProvider,
 } from "./user.controller.js";
@@ -55,6 +61,8 @@ router.get(
 router.use(verifyToken, requireAdmin);
 
 router.get("/count", getUsersCount);
+router.get("/admins", getAdminUsers);
+router.get("/authorized", getAuthorizedUsers);
 
 router.get(
   "/",
@@ -70,12 +78,39 @@ router.get(
   searchUserByEmail,
 );
 
+router.post(
+  "/authorized",
+  [
+    body("email").isEmail().withMessage("Email inválido"),
+    body("name").optional().trim().isLength({ max: 80 }),
+    body("role").optional().trim().equals("student"),
+    body("authorized").optional().isBoolean().toBoolean(),
+  ],
+  validate,
+  createAuthorizedUser,
+);
+
+router.patch(
+  "/authorized/:authorizationId",
+  [
+    body("email").optional().isEmail().withMessage("Email inválido"),
+    body("name").optional().trim().isLength({ max: 80 }),
+    body("authorized").optional().isBoolean().toBoolean(),
+  ],
+  validate,
+  updateAuthorizedUser,
+);
+
+router.delete("/authorized/:authorizationId", deleteAuthorizedUser);
+
 router.patch(
   "/:uid/role",
   [body("role").trim().notEmpty().withMessage("Rol requerido")],
   validate,
   updateUserRole,
 );
+
+router.delete("/:uid", deleteUser);
 
 router.patch(
   "/:uid/points",
